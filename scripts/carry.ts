@@ -18,6 +18,8 @@ step(1.5);
 console.log('grab →', carry.grab(a, things, all));
 step(0.5);
 const headTop = (a as any).parts.get('head').body.translation().y + a.dims.headR;
+const chest = a.chestBody.translation(); const bp = ball.body.translation(); const f0 = a.debugState().facing;
+console.log('ball in front of chest:', ((bp.x - chest.x) * Math.sin(f0) + (bp.z - chest.z) * Math.cos(f0)).toFixed(2), 'ahead,', (bp.y - chest.y).toFixed(2), 'up from chest; below head top', bp.y < headTop);
 console.log('ball above head:', (ball.body.translation().y - headTop).toFixed(2), 'units; carrier tilt', tilt(a).toFixed(1) + '°');
 a.setMoveInput(0, 1); step(1.5); a.setMoveInput(0, 0); step(0.5);
 console.log('walked with it: ball still overhead', (ball.body.translation().y - headTop) > 0, '| carrier tilt', tilt(a).toFixed(1) + '°');

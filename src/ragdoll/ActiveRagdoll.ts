@@ -345,6 +345,8 @@ export class ActiveRagdoll {
   // ---- Carrying ----
   /** Holding something overhead (wanted, and eased 0..1 for the pose). */
   private holdWanted = false;
+  /** In front, hugged in the fins (things), or hoisted overhead (someone else). */
+  private holdStyle: 'front' | 'overhead' = 'front';
   private hold = 0;
   /** Being carried by someone else: weightless, kicking, startled. */
   private carried = false;
@@ -601,7 +603,10 @@ export class ActiveRagdoll {
    * Holding something overhead: fins up, a little lean back. The caller attaches the
    * held thing (see `holdPoint` and `chestBody`); this only does the pose.
    */
-  setHolding(on: boolean): void { this.holdWanted = on; }
+  setHolding(on: boolean, style: 'front' | 'overhead' = 'front'): void {
+    this.holdWanted = on;
+    if (on) this.holdStyle = style;
+  }
   get isHolding(): boolean { return this.holdWanted; }
 
   /**
@@ -626,10 +631,14 @@ export class ActiveRagdoll {
   /** The belly, for being held by. */
   get bellyBody(): RAPIER.RigidBody { return this.torso.body; }
   /** Where a held thing goes, in the chest's own frame: up above the head. */
-  holdPoint(extra = 0): { x: number; y: number; z: number } {
+  holdPoint(extra = 0, style: 'front' | 'overhead' = 'front'): { x: number; y: number; z: number } {
     const d = this.dims;
-    const aboveHead = d.headY + d.headR - (d.spineY + d.chestLen / 2);
-    return { x: 0, y: aboveHead + 0.04 + extra, z: 0.02 };
+    if (style === 'overhead') {
+      const aboveHead = d.headY + d.headR - (d.spineY + d.chestLen / 2);
+      return { x: 0, y: aboveHead + 0.04 + extra, z: 0.02 };
+    }
+    // In front of the chest, a little low, between the fins: just clear of the body.
+    return { x: 0, y: -0.02, z: d.chestR + 0.03 + extra };
   }
 
   /** Bounced into the air (a trampoline): upward speed in units/s. Only when standing. */
@@ -1138,6 +1147,9 @@ export class ActiveRagdoll {
     const kick = this.carried ? 1 : 0;
     const flail = (rate: number, phase: number) => kick * Math.sin(this.time * rate + phase);
     const hold = this.hold;
+    // Front: fins swing forward and wrap in round it. Overhead: fins straight up.
+    const hugging = this.holdStyle === 'front' ? hold : 0;
+    const hoisting = this.holdStyle === 'overhead' ? hold : 0;
     // Rates of change of s and c, for the motors' velocity targets.
     const ds = c * this.gaitRate;
     const dc = -s * this.gaitRate;
@@ -1226,11 +1238,11 @@ export class ActiveRagdoll {
           const lift = 0.9 * Math.max(0, P.finsLift) + 0.35 * Math.min(0, P.finsLift);
           j.target.set(
             -armSwing + 0.7 * P.finsBack + 0.25 * P.fidget * this.noise(left ? 3 : 4) - (left ? X.finFwdL : X.finFwdR)
-              - 0.3 * hold,
+              - 0.3 * hoisting - 1.25 * hugging,
             0,
             side * (GAIT.armOut + 0.03 * breathe * (1 - w) + 0.35 * P.finsSpread + lift
               + JUMP.finsUp * this.air + 0.05 * shake(41) + (left ? X.finRaiseL : X.finRaiseR)
-              + 1.6 * hold + kick * 0.7 + 0.5 * flail(9, left ? 0 : 1.7)),
+              + 1.6 * hoisting - 0.25 * hugging + kick * 0.7 + 0.5 * flail(9, left ? 0 : 1.7)),
           );
           j.targetVel.x = (left ? ds : -ds) * armSwingAmp * w;
           break;
@@ -1241,7 +1253,7 @@ export class ActiveRagdoll {
           // swings forward, like a flipper following through.
           const swingingForward = Math.max(0, -(left ? s : -s)) * w;
           // Elbow letter: bent forward (the hinge stops it bending far backward).
-          j.target.set(-(GAIT.finCurl + GAIT.finFollow * swingingForward + 0.9 * P.elbowBend + (left ? X.elbowL : X.elbowR) + 0.5 * hold), 0, 0);
+          j.target.set(-(GAIT.finCurl + GAIT.finFollow * swingingForward + 0.9 * P.elbowBend + (left ? X.elbowL : X.elbowR) + 0.5 * hoisting + 0.9 * hugging), 0, 0);
           break;
         }
       }

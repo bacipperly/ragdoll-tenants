@@ -4,8 +4,9 @@
  * THINGS: a beach ball, a stack of crates, a cushion (all free to push, kick, carry and
  * throw), and a trampoline that bounces anyone who steps on it.
  *
- * CARRYING: the selected tenant picks up whatever's nearest in front of it and holds it
- * overhead, on a ball joint from its chest. A held thing is weightless and stops
+ * CARRYING: the selected tenant picks up whatever's nearest in front of it: a thing is
+ * hugged in front of its chest, another tenant is hoisted overhead; either way on a ball
+ * joint from its chest. A held thing is weightless and stops
  * bumping the carrier; a held tenant floats, kicks and flails (ActiveRagdoll.setCarried).
  * Throwing lets go with a fling; a thrown tenant goes limp, tumbles, lands, and gets up
  * a moment later, the way the game's throws are meant to play.
@@ -214,14 +215,15 @@ export class Carry {
     if (!best) return null;
     this.held = (best as { pick: () => Held }).pick();
     this.carrier = who;
-    who.setHolding(true);
+    // Things are hugged in front; another tenant is hoisted overhead.
+    who.setHolding(true, (this.held as Held).kind === 'tenant' ? 'overhead' : 'front');
     return this.heldName;
   }
 
   /** Where the held thing's centre goes, in the world: above the carrier's head. */
-  private holdWorld(who: ActiveRagdoll, extra: number, out: THREE.Vector3): THREE.Vector3 {
+  private holdWorld(who: ActiveRagdoll, extra: number, out: THREE.Vector3, style: 'front' | 'overhead' = 'front'): THREE.Vector3 {
     const c = who.chestBody;
-    const hp = who.holdPoint(extra);
+    const hp = who.holdPoint(extra, style);
     const r = c.rotation(), t = c.translation();
     this.q.set(r.x, r.y, r.z, r.w);
     return out.set(hp.x, hp.y, hp.z).applyQuaternion(this.q).add(this.v.set(t.x, t.y, t.z));
@@ -244,13 +246,13 @@ export class Carry {
   private attachTenant(who: ActiveRagdoll, r: ActiveRagdoll): Held {
     // Lift the whole tenant so its belly is above the carrier's head, then hold it there.
     const extra = r.dims.bellyR + 0.02;
-    const at = this.holdWorld(who, extra, new THREE.Vector3());
+    const at = this.holdWorld(who, extra, new THREE.Vector3(), 'overhead');
     const feet = at.clone(); feet.y -= r.dims.bellyY;
     r.reset(feet, r.debugState().facing);
     r.setCarried(true);
     this.flying.delete(r);
     const joint = this.world.createImpulseJoint(
-      RAPIER.JointData.spherical(who.holdPoint(extra), { x: 0, y: 0, z: 0 }), who.chestBody, r.bellyBody, true,
+      RAPIER.JointData.spherical(who.holdPoint(extra, 'overhead'), { x: 0, y: 0, z: 0 }), who.chestBody, r.bellyBody, true,
     );
     return { kind: 'tenant', tenant: r, joint };
   }

@@ -1,0 +1,14 @@
+import * as THREE from 'three';
+import { RagdollPhysics, RAPIER } from '../src/ragdoll';
+const phys = await RagdollPhysics.create();
+phys.world.createCollider(RAPIER.ColliderDesc.cuboid(50, 0.5, 50).setTranslation(0, -0.5, 0));
+const r = phys.createRagdoll();
+const parts = (r as any).parts;
+const tilt = (n: string) => { const q = parts.get(n).body.rotation(); return (Math.acos(Math.min(1, 1 - 2 * (q.x * q.x + q.z * q.z))) * 57.3).toFixed(0); };
+const rep = (l: string) => console.log(l.padEnd(12), 'head', tilt('head'), 'torso', tilt('torso'), 'headY', parts.get('head').body.translation().y.toFixed(3));
+const run = (s: number, l: string) => { for (let t = 0; t < s; t += 1 / 60) phys.step(1 / 60); rep(l); };
+for (let i = 0; i < 6; i++) run(0.1, 'spawn ' + i);
+run(2, 'idle');
+r.setMoveInput(0, 1); run(2, 'walk'); r.setMoveInput(0, 0); run(1, 'stop');
+r.setKnockedOut(true); run(2, 'KO'); r.setKnockedOut(false); run(3, 'recovered');
+r.reset(new THREE.Vector3(), 0); run(0.02, 'reset'); run(1, 'reset+1s');

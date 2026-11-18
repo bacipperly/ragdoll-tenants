@@ -1,0 +1,35 @@
+{
+  "default": "My tenant",
+  "characters": [
+    {
+      "version": 1,
+      "name": "My tenant",
+      "color": "#3a86ff",
+      "mood": "calm",
+      "traits": {
+        "age": 1,
+        "weight": 0,
+        "fitness": -0.2
+      },
+      "proportions": {
+        "headSize": 0.8,
+        "headFloat": 1,
+        "bodyWidth": 0.83,
+        "bodyHeight": 0.65,
+        "legLength": 0.92,
+        "legThickness": 0.87,
+        "finLength": 0.8,
+        "finWidth": 0.89,
+        "shoulderWidth": 1,
+        "hipWidth": 1,
+        "waist": 0,
+        "eyeSize": 1,
+        "eyeSpacing": 1,
+        "eyeHeight": 0,
+        "lashes": 0,
+        "blush": 0,
+        "mouthWidth": 1
+      }
+    }
+  ]
+}

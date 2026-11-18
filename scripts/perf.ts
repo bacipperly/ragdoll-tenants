@@ -1,0 +1,11 @@
+import * as THREE from 'three';
+import { RagdollPhysics, RAPIER } from '../src/ragdoll';
+const phys = await RagdollPhysics.create();
+phys.world.numSolverIterations = Number(process.env.ITERS ?? 4);
+phys.world.numInternalPgsIterations = Number(process.env.PGS ?? 1);
+phys.world.createCollider(RAPIER.ColliderDesc.cuboid(50, 0.5, 50).setTranslation(0, -0.5, 0));
+const rs = Array.from({ length: 13 }, (_, i) => { const r = phys.createRagdoll({ position: new THREE.Vector3((i % 5) * 1.5, 0, Math.floor(i / 5) * 1.5) }); return r; });
+for (const [i, r] of rs.entries()) r.setMoveInput(Math.sin(i), Math.cos(i));
+for (let i = 0; i < 120; i++) phys.step(1 / 60);
+const t0 = performance.now(); for (let i = 0; i < 600; i++) phys.step(1 / 60);
+console.log('13 ragdolls ms/frame:', ((performance.now() - t0) / 600).toFixed(3));

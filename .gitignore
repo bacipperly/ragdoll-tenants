@@ -1,0 +1,7 @@
+node_modules/
+dist/
+# The character drawing and design brief stay local.
+source/
+*.tmp
+.DS_Store
+.claude/

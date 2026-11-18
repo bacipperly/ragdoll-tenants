@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Active Ragdoll POC</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #cfd8dc; font-family: system-ui, sans-serif; }
+      canvas { display: block; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; padding: 10px 12px; border-radius: 8px;
+        background: rgba(20, 24, 28, 0.72); color: #eceff1; font-size: 12px; line-height: 1.55;
+        pointer-events: none; white-space: pre; font-variant-numeric: tabular-nums;
+      }
+      #hud b { color: #ffd166; }
+    </style>
+  </head>
+  <body>
+    <div id="hud"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,283 @@
+/*
+ * Sandbox: characters and the crowd (not part of the ragdoll module).
+ *
+ * - The CROWD: every tenant on screen, each built from its own recipe. One is selected:
+ *   WASD drives it, the camera follows it, and the tuning panel's look sliders (Traits,
+ *   Proportions, Silhouette, Face) edit it. Click any tenant to select it. The others
+ *   wander about on their own, now and then waving, sighing or changing mood.
+ * - The LIBRARY: named recipes in characters.json at the project root, saved through the
+ *   dev server. One can be the default, which is who you start as.
+ */
+import * as THREE from 'three';
+import type GUI from 'lil-gui';
+import type { ActiveRagdoll, RagdollPhysics, Recipe } from './ragdoll';
+import { loadIntoEditor, parseRecipe, randomRecipe, recipeFromEditor } from './ragdoll';
+import { GESTURE_NAMES, type GestureName } from './ragdoll/gestures';
+import { MOOD_NAMES } from './ragdoll/mood';
+import { pasteBox } from './tuner';
+
+/** Where a wandering tenant is heading, and how long it's pausing or has been trying. */
+interface Wander { target: THREE.Vector3; wait: number; tried: number; stroll: boolean }
+
+export class Crowd {
+  readonly tenants: ActiveRagdoll[] = [];
+  selected: ActiveRagdoll;
+  private readonly wander = new Map<ActiveRagdoll, Wander>();
+  private readonly ring: THREE.Mesh;
+  private readonly tmp = new THREE.Vector3();
+  private readonly raycaster = new THREE.Raycaster();
+  /** Called whenever the selected tenant changes (or is rebuilt). */
+  onSelect: (r: ActiveRagdoll) => void = () => {};
+
+  constructor(private readonly physics: RagdollPhysics, private readonly scene: THREE.Scene, first: ActiveRagdoll) {
+    this.tenants.push(first);
+    this.selected = first;
+    // A soft ring on the floor under whoever's selected.
+    this.ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.85, 1, 40).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7, depthWrite: false }),
+    );
+    this.ring.renderOrder = 5;
+    scene.add(this.ring);
+  }
+
+  /** Adds a tenant built from `recipe` where its feet should be. */
+  add(recipe: Recipe, position: THREE.Vector3, facing = Math.random() * Math.PI * 2): ActiveRagdoll {
+    const r = this.physics.createRagdoll({ recipe, position, facing });
+    this.scene.add(r.group);
+    this.tenants.push(r);
+    return r;
+  }
+
+  /** Rebuilds a tenant from a new recipe where it stands (keeping selection, mood and skeleton view). */
+  replace(old: ActiveRagdoll, recipe: Recipe, keepMood = true): ActiveRagdoll {
+    const s = old.debugState();
+    old.middle(this.tmp);
+    this.tmp.y = s.groundY;
+    const next = this.physics.createRagdoll({ recipe, position: this.tmp.clone(), facing: s.facing });
+    if (keepMood) next.setMood(old.mood);
+    next.setShowSkeleton(old.showingSkeleton);
+    this.scene.add(next.group);
+    this.tenants[this.tenants.indexOf(old)] = next;
+    this.wander.delete(old);
+    this.physics.removeRagdoll(old);
+    if (old === this.selected) this.select(next);
+    return next;
+  }
+
+  /** Everyone but the selected tenant leaves. */
+  clearOthers(): void {
+    for (const r of [...this.tenants]) {
+      if (r === this.selected) continue;
+      this.physics.removeRagdoll(r);
+      this.wander.delete(r);
+    }
+    this.tenants.length = 0;
+    this.tenants.push(this.selected);
+  }
+
+  select(r: ActiveRagdoll): void {
+    if (this.selected !== r) this.selected.setMoveInput(0, 0);
+    this.selected = r;
+    this.wander.delete(r);
+    this.onSelect(r);
+  }
+
+  /** The tenant under a screen point (normalised device coords), if any. */
+  pick(ndc: THREE.Vector2, camera: THREE.Camera): ActiveRagdoll | null {
+    this.raycaster.setFromCamera(ndc, camera);
+    let best: ActiveRagdoll | null = null, bestDist = Infinity;
+    for (const r of this.tenants) {
+      const hit = this.raycaster.intersectObjects(r.hitMeshes, false)[0];
+      if (hit && hit.distance < bestDist) { best = r; bestDist = hit.distance; }
+    }
+    return best;
+  }
+
+  /** Steers the wanderers and moves the selection ring. Call once per frame. */
+  update(dt: number): void {
+    for (const r of this.tenants) {
+      if (r === this.selected || r.isKnockedOut) continue;
+      let w = this.wander.get(r);
+      if (!w) { w = { target: randomSpot(), wait: Math.random() * 2, tried: 0, stroll: Math.random() < 0.5 }; this.wander.set(r, w); }
+      r.middle(this.tmp);
+      if (w.wait > 0) {
+        w.wait -= dt;
+        r.setMoveInput(0, 0);
+        continue;
+      }
+      const dx = w.target.x - this.tmp.x, dz = w.target.z - this.tmp.z;
+      const dist = Math.hypot(dx, dz);
+      w.tried += dt;
+      if (dist < 0.35 || w.tried > 8) {
+        // Arrived (or stuck behind something): pause, maybe do something, pick a new spot.
+        w.target = randomSpot();
+        w.wait = 1 + Math.random() * 3;
+        w.tried = 0;
+        w.stroll = Math.random() < 0.5;
+        const roll = Math.random();
+        if (roll < 0.25) r.playGesture(IDLE_GESTURES[Math.floor(Math.random() * IDLE_GESTURES.length)]);
+        else if (roll < 0.33) r.setMood(MOOD_NAMES[Math.floor(Math.random() * (MOOD_NAMES.length - 1))]);
+        r.setMoveInput(0, 0);
+        continue;
+      }
+      r.setMoveInput(dx / dist, dz / dist, w.stroll);
+    }
+    // The ring sits on the floor under the selected tenant, sized to it.
+    const s = this.selected;
+    s.middle(this.tmp);
+    this.ring.position.set(this.tmp.x, s.debugState().groundY + 0.006, this.tmp.z);
+    this.ring.scale.setScalar(Math.max(0.18, s.dims.bellyR * 2.6));
+  }
+}
+
+const IDLE_GESTURES: GestureName[] = GESTURE_NAMES.filter((g) => !['flinch', 'startle', 'stomp', 'slump'].includes(g));
+
+function randomSpot(): THREE.Vector3 {
+  const a = Math.random() * Math.PI * 2, d = 1 + Math.random() * 6;
+  return new THREE.Vector3(Math.cos(a) * d, 0, Math.sin(a) * d);
+}
+
+// ---------------------------------------------------------------- the library
+
+export interface Library { default?: string; characters: Recipe[] }
+
+export async function loadLibrary(): Promise<Library> {
+  try {
+    // The dev server's live library; on a static copy of the site (no dev server), the
+    // characters.json shipped next to the page instead, read-only.
+    let res = await fetch('/__ragdoll/characters').catch(() => null);
+    if (!res?.ok || !(res.headers.get('content-type') ?? '').includes('json')) res = await fetch('./characters.json');
+    const data = (await res.json()) as { default?: unknown; characters?: unknown[] };
+    const characters = (data.characters ?? []).map((c) => parseRecipe(c)).filter((c): c is Recipe => c !== null);
+    return { default: typeof data.default === 'string' ? data.default : undefined, characters };
+  } catch {
+    return { characters: [] };
+  }
+}
+
+export async function saveLibrary(lib: Library): Promise<boolean> {
+  try {
+    const res = await fetch('/__ragdoll/characters', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lib),
+    });
+    // A static host may answer a POST with an HTML page; only the dev server's JSON counts.
+    return res.ok && (res.headers.get('content-type') ?? '').includes('json');
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------- the panel
+
+/**
+ * The Characters section: name and colour, the library (save, load, delete, default),
+ * random tenants, copy/paste a recipe as text, and filling the room with a crowd.
+ * @param refreshLook call after the editor's look changes, to update the sliders
+ */
+export function addCharactersSection(gui: GUI, crowd: Crowd, lib: Library, refreshLook: () => void): () => void {
+  const folder = gui.addFolder('Characters');
+  const state = {
+    name: crowd.selected.recipe.name,
+    color: crowd.selected.recipe.color,
+    pick: lib.characters[0]?.name ?? '',
+    status: '',
+  };
+  const say = (t: string) => { state.status = t; statusCtrl.updateDisplay(); };
+  const current = (): Recipe => recipeFromEditor(state.name, state.color, crowd.selected.mood);
+  /** Rebuild the selected tenant as `recipe` and put its look in the sliders. */
+  const become = (recipe: Recipe) => {
+    loadIntoEditor(recipe);
+    state.name = recipe.name;
+    state.color = recipe.color;
+    crowd.replace(crowd.selected, recipe, false);
+    refreshLook();
+    syncFromSelected();
+  };
+  const save = async (msg: string) => say((await saveLibrary(lib)) ? msg : "Couldn't save: is this the dev server?");
+  let pickCtrl = folder.add(state, 'pick', lib.characters.map((c) => c.name)).name('library');
+  const refreshPick = () => {
+    const names = lib.characters.map((c) => c.name);
+    if (!names.includes(state.pick)) state.pick = names[0] ?? '';
+    pickCtrl = pickCtrl.options(names).name('library');
+  };
+
+  folder.add(state, 'name').name('name').onFinishChange(() => { crowd.selected.recipe.name = state.name; });
+  folder.addColor(state, 'color').name('colour').onChange(() => crowd.selected.setColor(state.color));
+  const actions = {
+    save: async () => {
+      const r = current();
+      const i = lib.characters.findIndex((c) => c.name === r.name);
+      if (i >= 0) lib.characters[i] = r; else lib.characters.push(r);
+      state.pick = r.name;
+      refreshPick();
+      await save(`Saved "${r.name}" to characters.json`);
+    },
+    makeDefault: async () => {
+      const r = current();
+      if (!lib.characters.some((c) => c.name === r.name)) lib.characters.push(r);
+      lib.default = r.name;
+      refreshPick();
+      await save(`"${r.name}" is who you start as`);
+    },
+    load: () => {
+      const r = lib.characters.find((c) => c.name === state.pick);
+      if (r) { become(structuredClone(r)); say(`Loaded "${r.name}"`); }
+    },
+    remove: async () => {
+      lib.characters = lib.characters.filter((c) => c.name !== state.pick);
+      if (lib.default === state.pick) lib.default = undefined;
+      refreshPick();
+      await save('Deleted from the library');
+    },
+    randomize: () => { become(randomRecipe(current())); say('A new random look: Save to keep it'); },
+    copy: async () => {
+      const text = JSON.stringify(current(), null, 2);
+      try { await navigator.clipboard.writeText(text); say('Recipe copied'); } catch { window.prompt('Copy this recipe:', text.replace(/\n\s*/g, ' ')); }
+    },
+    paste: async () => {
+      const text = await pasteBox('Paste a character recipe (from Copy recipe, or characters.json):');
+      if (text === null) return;
+      let data: unknown = null;
+      try { data = JSON.parse(text); } catch { /* handled below */ }
+      const r = parseRecipe(data, current());
+      if (!r) { say("That doesn't look like a recipe"); return; }
+      become(r);
+      say(`Pasted "${r.name}": Save to keep it`);
+    },
+    crowdRandom: () => {
+      const base = current();
+      for (let i = 0; i < 12; i++) crowd.add(randomRecipe(base), spawnSpot(i));
+      say(`${crowd.tenants.length} tenants`);
+    },
+    crowdLibrary: () => {
+      lib.characters.forEach((r, i) => crowd.add(structuredClone(r), spawnSpot(i)));
+      say(`${crowd.tenants.length} tenants`);
+    },
+    clear: () => { crowd.clearOthers(); say('Just you now'); },
+  };
+  folder.add(actions, 'load').name('↳ Load the one picked above');
+  folder.add(actions, 'save').name('💾 Save to library');
+  folder.add(actions, 'makeDefault').name('⭐ Make this who I start as');
+  folder.add(actions, 'remove').name('🗑 Delete the one picked above');
+  folder.add(actions, 'randomize').name('🎲 Random look');
+  folder.add(actions, 'copy').name('📋 Copy recipe');
+  folder.add(actions, 'paste').name('📥 Paste recipe');
+  folder.add(actions, 'crowdRandom').name('👥 Add 12 random tenants');
+  folder.add(actions, 'crowdLibrary').name('👥 Add everyone in the library');
+  folder.add(actions, 'clear').name('✕ Remove the others');
+  const statusCtrl = folder.add(state, 'status').name('').disable();
+
+  // Keep the name and colour fields in step with whoever's selected.
+  const syncFromSelected = () => {
+    state.name = crowd.selected.recipe.name;
+    state.color = crowd.selected.recipe.color;
+    folder.controllersRecursive().forEach((c) => c.updateDisplay());
+  };
+  return syncFromSelected;
+}
+
+function spawnSpot(i: number): THREE.Vector3 {
+  const a = i * 2.39996, d = 1.5 + 0.45 * i; // a golden-angle spiral, so nobody lands on anybody
+  return new THREE.Vector3(Math.cos(a) * d, 0, Math.sin(a) * d);
+}

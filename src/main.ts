@@ -39,13 +39,14 @@ scene.add(sun, sun.target);
 // ---- Cameras: close-up perspective follow, and the game's far orthographic view ----
 const persp = new THREE.PerspectiveCamera(40, 1, 0.05, 100);
 const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
-let useOrtho = false;
+let useOrtho = true; // start in the game's view; C switches to the close-up
 let camYaw = 0; // which way the camera looks on the ground; 0 = looking north. Read back from the orbit.
 const ORTHO_HALF_HEIGHT = 4.5;
 
-// Start positions, relative to the ragdoll: close-up behind it, and the game's far view.
+// Start positions, relative to the ragdoll: close-up behind it, and the game's far view
+// at a true isometric angle (45° around, looking down 35.26°, i.e. along (1, -1, 1)).
 persp.position.set(0, 1.8, -2.6);
-ortho.position.set(0, 18, -20);
+ortho.position.set(-15, 15, -15);
 
 /**
  * Mouse orbit on both cameras: drag to orbit, wheel to zoom. Panning is off because
@@ -66,7 +67,8 @@ perspOrbit.maxDistance = 10;
 const orthoOrbit = makeOrbit(ortho);
 orthoOrbit.minZoom = 0.4;
 orthoOrbit.maxZoom = 4;
-orthoOrbit.enabled = false;
+perspOrbit.enabled = !useOrtho;
+orthoOrbit.enabled = useOrtho;
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight, a = w / h;

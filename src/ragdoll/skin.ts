@@ -123,6 +123,7 @@ arcGeometry.rotateZ(Math.PI + Math.PI * 0.2); // the torus arc starts at +x; tur
 const EYE_OPEN = new THREE.Vector3(0.021, 0.046, 0.012);
 const SMILE_SCALE = 0.032;
 /** The mouth's half-sizes: a closed line, the slack jaw when out cold, a surprised "o". */
+const MOUTH_Y = -0.058;
 const LINE_MOUTH = { x: 0.018, y: 0.0038 };
 const SLACK_MOUTH = { x: 0.016, y: 0.021 };
 const OPEN_MOUTH = { x: 0.017, y: 0.025 };
@@ -130,6 +131,7 @@ const BROW = new THREE.Vector3(0.05, 0.0095, 0.006);
 const browGeometry = new THREE.CapsuleGeometry(0.5, 1, 2, 6).rotateZ(Math.PI / 2); // a rounded bar along x
 /** A thin bar along +x starting at its origin, for lashes (so it can be rotated about its root). */
 const lashGeometry = new THREE.CapsuleGeometry(0.5, 1, 2, 5).rotateZ(Math.PI / 2).translate(0.75, 0, 0);
+const tongueMaterial = new THREE.MeshStandardMaterial({ color: 0xff6f91, roughness: 0.5 });
 const blushMaterial = new THREE.MeshStandardMaterial({ color: 0xff7aa2, roughness: 0.8, transparent: true, opacity: 0.75 });
 /** Where on each eye's outline the lashes grow (radians from "outward", toward "up"), and how long each is. */
 const LASHES = [[0.35, 0.8], [0.75, 1], [1.15, 0.85]] as const;
@@ -142,8 +144,8 @@ interface Feature { obj: THREE.Object3D; x: number; y: number; inset: number }
  * The face, as in the drawing: tall oval eyes and a small smile on the +z side of the
  * head. It rides on the head bone, so positions are relative to the head's centre.
  *
- * It's driven by the face letters (see mood.ts): smile, mouthOpen, eyeOpen, brows, gaze
- * and blush, plus `awake` (0 = out cold: eyes shut to curves, the jaw slack), which
+ * It's driven by the face letters (see mood.ts): smile, mouthOpen, eyeOpen, brows, gaze,
+ * blush, and the concentrating ones (lopsided, mouthShift, tongue), plus `awake` (0 = out cold: eyes shut to curves, the jaw slack), which
  * overrides the rest as it drops.
  */
 export class Face {
@@ -162,6 +164,14 @@ export class Face {
   private readonly frown: THREE.Mesh;
   /** One mouth: a flat line that opens into an "o" (smile and frown arcs replace it). */
   private readonly mouth: THREE.Mesh;
+  private readonly mouthQ: THREE.Quaternion;
+  /** The tip of the tongue, poking out of the corner of the mouth when concentrating. */
+  private readonly tongue: THREE.Mesh;
+  /**
+   * Which side this face favours when it goes lopsided (+1 or −1): the eye that squints
+   * harder and the corner the mouth slides to. Each tenant has its own.
+   */
+  private readonly side: number;
   private readonly tilt = new THREE.Quaternion();
   private readonly zAxis = new THREE.Vector3(0, 0, 1);
   /**
@@ -174,8 +184,9 @@ export class Face {
   private readonly riding = new Map<THREE.Object3D, number>();
   private gooScale = 1;
 
-  constructor(r: number, shape: FaceShape = DEFAULT_FACE) {
+  constructor(r: number, shape: FaceShape = DEFAULT_FACE, side = 1) {
     this.shape = shape;
+    this.side = side < 0 ? -1 : 1;
     this.r = r;
     const flatOnFace = (m: THREE.Object3D) => m.lookAt(m.position.clone().multiplyScalar(2));
     const place = (m: THREE.Object3D, x: number, y: number, inset: number) => {
@@ -226,7 +237,10 @@ export class Face {
     this.bases.set(this.frown, this.frown.position.clone());
     // The mouth: a flat line that opens into a round "o" in place.
     this.mouth = new THREE.Mesh(eyeGeometry, faceMaterial);
-    place(this.mouth, 0, -0.058, 0.003);
+    place(this.mouth, 0, MOUTH_Y, 0.003);
+    this.mouthQ = this.mouth.quaternion.clone();
+    this.tongue = new THREE.Mesh(eyeGeometry, tongueMaterial);
+    place(this.tongue, 0, MOUTH_Y - 0.006, 0.0015);
     this.setExpression(1, NEUTRAL);
   }
 
@@ -305,10 +319,16 @@ export class Face {
     // Wide: taller and much rounder. Narrowed: half-lidded down to a slit.
     const eyeW = EYE_OPEN.x * es * (1 + 0.4 * Math.max(0, eo));
     const eyeH = EYE_OPEN.y * es * open * (eo >= 0 ? 1 + 0.1 * eo : 1 + 0.6 * eo);
-    for (const m of this.eyesOpen) {
-      m.scale.set(eyeW, eyeH, EYE_OPEN.z);
+    // Lopsided: the favoured side's eye squints harder, the other opens a touch.
+    const lop = L('lopsided') * this.side;
+    this.eyesOpen.forEach((m, i) => {
+      const s = i === 0 ? 1 : -1; // eyes are made +x first
+      const k = s * lop;
+      // Squeezed to a slit (and a touch wider) on the squinting side.
+      const squash = k > 0 ? Math.max(0.2, 1 - 1.05 * k) : 1 - 0.15 * k;
+      m.scale.set(eyeW * (1 + 0.2 * Math.max(0, k)), eyeH * squash, EYE_OPEN.z);
       m.visible = open > 0.02;
-    }
+    });
     for (const m of this.eyesShut) {
       m.scale.setScalar(0.022 * es * shut);
       m.visible = shut > 0.02;
@@ -321,7 +341,7 @@ export class Face {
     for (const b of this.brows) {
       this.tilt.setFromAxisAngle(this.zAxis, b.side * 0.5 * L('browAngle'));
       b.mesh.quaternion.copy(b.base).multiply(this.tilt);
-      const y = b.y + 0.016 * L('browHeight');
+      const y = b.y + 0.016 * L('browHeight') - 0.012 * b.side * lop;
       this.bases.get(b.mesh)!.set(b.x, y, this.onSurface(b.x, y) - 0.001);
       b.mesh.scale.set(BROW.x * browShow, BROW.y * browShow, BROW.z);
       b.mesh.visible = browShow > 0.02;
@@ -352,6 +372,20 @@ export class Face {
     const lx = LINE_MOUTH.x * mw * line, ly = LINE_MOUTH.y * line;
     this.mouth.scale.set(Math.max(lx * (1 - oh), 0) + ox * oh, Math.max(ly * (1 - oh), 0) + oy * oh, 0.008);
     this.mouth.visible = Math.max(line, oh) > 0.02;
+
+    // Concentrating: the mouth slides off to one side, scrunched shorter and tilted up at
+    // that corner, and the tip of the tongue pokes out of it.
+    const shift = L('mouthShift') * this.side;
+    const mx = 0.022 * shift;
+    this.bases.get(this.mouth)!.set(mx, MOUTH_Y, this.onSurface(mx, MOUTH_Y) - 0.003);
+    this.tilt.setFromAxisAngle(this.zAxis, 0.35 * shift);
+    this.mouth.quaternion.copy(this.mouthQ).multiply(this.tilt);
+    this.mouth.scale.x *= 1 - 0.2 * Math.abs(shift);
+    const tongue = L('tongue') * smoothstep(awake, 0.5, 1);
+    const tx = mx + Math.sign(shift || this.side) * 0.55 * this.mouth.scale.x, ty = MOUTH_Y - 0.007 + 0.004 * Math.abs(shift);
+    this.bases.get(this.tongue)!.set(tx, ty, this.onSurface(tx, ty) - 0.0015);
+    this.tongue.scale.set(0.013 * tongue * Math.sqrt(mw), 0.015 * tongue, 0.007);
+    this.tongue.visible = tongue > 0.02;
     this.followSurface();
   }
 }

@@ -45,6 +45,9 @@ export const FACE_LETTERS = [
   'gazeX', // −1 ↔ +1 eyes looking to one side or the other
   'gazeY', // −1 down ↔ +1 up
   'blush', // 0..1 rosy cheeks (on top of any blush in the character's look)
+  'lopsided', // −1..1 one eye squints harder and its brow drops, the other opens and lifts (concentrating)
+  'mouthShift', // −1..1 the mouth slides off to one side, scrunched and tilted
+  'tongue', // 0..1 the tip of the tongue pokes out of the corner of the mouth
 ] as const;
 
 export type PostureLetter = (typeof POSTURE_LETTERS)[number];
@@ -61,7 +64,7 @@ export const NEUTRAL: Letters = Object.fromEntries(LETTERS.map((l) => [l, l === 
 
 /** Each letter's range, for sliders. */
 export const LETTER_RANGE: Record<Letter, [number, number]> = Object.fromEntries(
-  LETTERS.map((l) => [l, ['sway', 'tremble', 'fidget', 'mouthOpen', 'browShow', 'blush'].includes(l) ? [0, 1] : [-1, 1]]),
+  LETTERS.map((l) => [l, ['sway', 'tremble', 'fidget', 'mouthOpen', 'browShow', 'blush', 'tongue'].includes(l) ? [0, 1] : [-1, 1]]),
 ) as Record<Letter, [number, number]>;
 
 /** The moods. Spelled with letters; tweak these to change how a mood reads. */
@@ -124,9 +127,13 @@ export const REACTIONS = {
     spine: 0.4, finsLift: 0.35, finsSpread: 0.4, energy: 0.3,
     smile: 0, mouthOpen: 1, eyeOpen: 1, browShow: 1, browHeight: 1, browAngle: -0.4,
   },
-  /** The game face, while jumping. */
+  /**
+   * The game face, while jumping: concentrating hard. Lopsided squint, knitted brows, the
+   * mouth scrunched off to one side with the tongue poking out of the corner.
+   */
   focused: {
-    smile: 0, eyeOpen: -0.3, browShow: 1, browHeight: -0.75, browAngle: 0.3,
+    smile: 0, eyeOpen: -0.3, browShow: 1, browHeight: -0.35, browAngle: 0.45, gazeY: -0.25,
+    lopsided: 0.75, mouthShift: 0.8, tongue: 1,
   },
 } satisfies Record<string, Word>;
 

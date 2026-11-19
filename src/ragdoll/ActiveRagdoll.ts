@@ -480,7 +480,10 @@ export class ActiveRagdoll {
     this.gooContact.reach = this.dims.headColliderR;
     // The face rides on the head bone.
     // The face is laid out for the drawn head size, then scaled with the head.
-    this.face = new Face(BODY.headR, this.dims.face);
+    // Each tenant favours a side when it concentrates (from its name, so it stays put).
+    let h = 0;
+    for (const c of this.recipe.name) h = (h * 31 + c.charCodeAt(0)) | 0;
+    this.face = new Face(BODY.headR, this.dims.face, h & 1 ? -1 : 1);
     this.face.root.scale.setScalar(this.dims.headScale);
     this.face.pinTo(this.goo, this.dims.headScale);
     this.part('head').bone.add(this.face.root);

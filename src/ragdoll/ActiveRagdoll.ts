@@ -915,7 +915,14 @@ export class ActiveRagdoll {
     const torso = this.torso.bone;
     const b = this.buttBone;
     b.quaternion.copy(torso.quaternion);
-    this.buttTarget.copy(this.buttFromTorso).applyQuaternion(torso.quaternion).add(torso.position);
+    // Walking shakes it: each footfall drops the cheeks and sways them toward the
+    // planted foot, and the spring turns that into lag, overshoot and wobble.
+    const kick = BUTT.walkBounce * this.dims.cheeks.r * this.gaitWeight;
+    this.buttTarget.set(
+      kick * Math.sin(this.gaitPhase),
+      -kick * Math.abs(Math.sin(this.gaitPhase)),
+      0,
+    ).add(this.buttFromTorso).applyQuaternion(torso.quaternion).add(torso.position);
     const lv = this.torso.body.linvel();
     this.buttTargetVel.set(lv.x, lv.y, lv.z);
     if (!this.buttSettled) { // first frame or after a teleport: start at rest

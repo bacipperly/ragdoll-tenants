@@ -126,9 +126,10 @@ export const SKIN = {
 
 /** The butt's jiggle: a spring the cheeks ride on, chasing the belly. */
 export const BUTT = {
-  frequency: 4.5, // Hz: lower is a slower, heavier wobble
-  dampingRatio: 0.18, // lower = bouncier, keeps wobbling longer
-  travel: 0.35, // the furthest the cheeks swing from rest, in cheek radii
+  frequency: 4, // Hz: lower is a slower, heavier wobble
+  dampingRatio: 0.14, // lower = bouncier, keeps wobbling longer
+  travel: 0.45, // the furthest the cheeks swing from rest, in cheek radii
+  walkBounce: 0.3, // how hard each footstep bounces and sways them while walking, in cheek radii
 };
 
 /**

@@ -122,8 +122,10 @@ arcGeometry.rotateZ(Math.PI + Math.PI * 0.2); // the torus arc starts at +x; tur
 
 const EYE_OPEN = new THREE.Vector3(0.021, 0.046, 0.012);
 const SMILE_SCALE = 0.032;
-const SLACK_MOUTH = new THREE.Vector3(0.016, 0.021, 0.008);
-const OPEN_MOUTH = new THREE.Vector3(0.017, 0.025, 0.008);
+/** The mouth's half-sizes: a closed line, the slack jaw when out cold, a surprised "o". */
+const LINE_MOUTH = { x: 0.018, y: 0.0038 };
+const SLACK_MOUTH = { x: 0.016, y: 0.021 };
+const OPEN_MOUTH = { x: 0.017, y: 0.025 };
 const BROW = new THREE.Vector3(0.05, 0.0095, 0.006);
 const browGeometry = new THREE.CapsuleGeometry(0.5, 1, 2, 6).rotateZ(Math.PI / 2); // a rounded bar along x
 /** A thin bar along +x starting at its origin, for lashes (so it can be rotated about its root). */
@@ -158,8 +160,8 @@ export class Face {
   private readonly cheeks: THREE.Mesh[] = [];
   private readonly smile: THREE.Mesh;
   private readonly frown: THREE.Mesh;
-  private readonly mouthO: THREE.Mesh;
-  private readonly mouthLine: THREE.Mesh;
+  /** One mouth: a flat line that opens into an "o" (smile and frown arcs replace it). */
+  private readonly mouth: THREE.Mesh;
   private readonly tilt = new THREE.Quaternion();
   private readonly zAxis = new THREE.Vector3(0, 0, 1);
   /**
@@ -222,12 +224,9 @@ export class Face {
     this.frown.position.set(0, -0.085, this.onSurface(0, -0.06) - 0.002);
     this.root.add(this.frown);
     this.bases.set(this.frown, this.frown.position.clone());
-    // An open "o" mouth: slack when out cold, round when surprised.
-    this.mouthO = new THREE.Mesh(eyeGeometry, faceMaterial);
-    place(this.mouthO, 0.004, -0.068, 0.003);
-    // A straight mouth, between a smile and a frown.
-    this.mouthLine = new THREE.Mesh(browGeometry, faceMaterial);
-    place(this.mouthLine, 0, -0.05, 0.001);
+    // The mouth: a flat line that opens into a round "o" in place.
+    this.mouth = new THREE.Mesh(eyeGeometry, faceMaterial);
+    place(this.mouth, 0, -0.058, 0.003);
     this.setExpression(1, NEUTRAL);
   }
 
@@ -344,16 +343,15 @@ export class Face {
     this.smile.visible = smile > 0.02;
     this.frown.scale.set(SMILE_SCALE * mw * 0.9 * frown, SMILE_SCALE * 0.7 * frown, SMILE_SCALE);
     this.frown.visible = frown > 0.02;
-    this.mouthLine.scale.set(0.036 * mw * line, 0.0075 * line, 0.006);
-    this.mouthLine.visible = line > 0.02;
+    // The line and the "o" are one shape: it opens from a flat line into an oval, in place,
+    // and the line part fades as a smile or frown takes over.
     const slack = 1 - smoothstep(awake, 0, 0.6);
-    const oh = L('mouthOpen');
-    this.mouthO.scale.set(
-      Math.max(SLACK_MOUTH.x * slack, OPEN_MOUTH.x * oh) * Math.sqrt(mw),
-      Math.max(SLACK_MOUTH.y * slack, OPEN_MOUTH.y * oh),
-      SLACK_MOUTH.z,
-    );
-    this.mouthO.visible = Math.max(slack, oh) > 0.02;
+    const oh = Math.min(1, Math.max(slack, L('mouthOpen')));
+    const ox = THREE.MathUtils.lerp(SLACK_MOUTH.x, OPEN_MOUTH.x, 1 - slack) * Math.sqrt(mw);
+    const oy = THREE.MathUtils.lerp(SLACK_MOUTH.y, OPEN_MOUTH.y, 1 - slack);
+    const lx = LINE_MOUTH.x * mw * line, ly = LINE_MOUTH.y * line;
+    this.mouth.scale.set(Math.max(lx * (1 - oh), 0) + ox * oh, Math.max(ly * (1 - oh), 0) + oy * oh, 0.008);
+    this.mouth.visible = Math.max(line, oh) > 0.02;
     this.followSurface();
   }
 }

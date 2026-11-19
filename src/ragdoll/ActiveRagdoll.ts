@@ -267,6 +267,8 @@ export class ActiveRagdoll {
   private readonly face: Face;
   /** How awake the face looks, 0..1: eased toward its target so eyes close and open smoothly. */
   private faceAwake = 1;
+  /** How far the lids are down for a blink (0..1): just the eyes, unlike faceAwake. */
+  private blink = 0;
   /** When the next idle blink starts, in seconds of this ragdoll's time. */
   private nextBlink = 2 + Math.random() * 3;
 
@@ -813,6 +815,7 @@ export class ActiveRagdoll {
     this.heldBody = null;
     this.hold = 0;
     this.faceAwake = 1;
+    this.blink = 0;
     this.surpriseTimer = this.annoyance = this.angryTimer = this.surprise = this.anger = 0;
     this.focus = this.focusHold = 0;
     this.face.setExpression(1, this.moods.letters);
@@ -1141,17 +1144,19 @@ export class ActiveRagdoll {
    * back. While awake it blinks now and then.
    */
   private updateFace(dt: number): void {
-    let target = this.knockedOut ? 0 : THREE.MathUtils.smoothstep(this.muscle, 0.2, 0.6);
-    // Idle blink: a quick dip to nearly shut, every few seconds.
-    if (target === 1 && this.time >= this.nextBlink) {
-      const t = this.time - this.nextBlink;
-      if (t < BLINK_SECONDS) target = 0.15;
-      else this.nextBlink = this.time + 2.5 + Math.random() * 4;
-    }
-    // Closing is quick (a knockout, a blink); opening is a bit slower and dozier.
+    const target = this.knockedOut ? 0 : THREE.MathUtils.smoothstep(this.muscle, 0.2, 0.6);
+    // Closing is quick (a knockout); opening is a bit slower and dozier.
     const rate = target < this.faceAwake ? 25 : 10;
     this.faceAwake += (target - this.faceAwake) * Math.min(1, dt * rate);
-    this.face.setExpression(this.faceAwake, this.moods.letters);
+    // Idle blink: the lids drop and lift again every few seconds. Only the eyes: the rest
+    // of the face (the jaw especially) stays as it is.
+    let lids = 0;
+    if (target === 1 && this.time >= this.nextBlink) {
+      if (this.time - this.nextBlink < BLINK_SECONDS) lids = 1;
+      else this.nextBlink = this.time + 2.5 + Math.random() * 4;
+    }
+    this.blink += (lids - this.blink) * Math.min(1, dt * (lids > this.blink ? 40 : 18));
+    // The face itself is drawn once per rendered frame, in syncMeshes.
     // Flush red with anger (only while awake), so it reads even at the game's distance.
     this.material.color.copy(this.baseColor).lerp(this.flushColor, EMOTION.flushAmount * this.anger * this.faceAwake);
   }
@@ -1231,7 +1236,7 @@ export class ActiveRagdoll {
       this.headAccelSteps = 0;
     }
     this.goo.update(dt, this.part('head').bone.quaternion, this.headAccel, this.gooContact, this.traits.squish, this.muscle * this.muscle);
-    this.face.followSurface();
+    this.face.setExpression(this.faceAwake, this.moods.letters, this.blink); // also rides it on the goo
     this.jiggleButt(dt);
   }
 
@@ -1329,6 +1334,7 @@ export class ActiveRagdoll {
     this.material.dispose();
     this.skin.skeleton.dispose();
     this.goo.dispose();
+    this.face.dispose();
     releaseSkin(this.dims);
     this.group.removeFromParent();
   }

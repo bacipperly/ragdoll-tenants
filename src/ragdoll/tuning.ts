@@ -9,7 +9,7 @@
  * Only plain numbers in the objects below can be tuned. Anything else in the file is
  * ignored with a console warning, so a typo can't break the ragdoll.
  */
-import { BUTT, CARRY, CLUMSY, EMOTION, GAIT, GOO, GRAVITY_COMP, JUMP, MUSCLES, PROPORTIONS, TRAITS } from './config';
+import { BUTT, CARRY, CLUMSY, EMOTION, FACE, GAIT, GOO, GRAVITY_COMP, JUMP, MUSCLES, PROPORTIONS, TRAITS } from './config';
 import { MOODS } from './mood';
 import saved from './tuning.json';
 
@@ -20,6 +20,7 @@ const ROOTS: Record<string, Num> = {
   BUTT,
   CARRY,
   CLUMSY,
+  FACE,
   MUSCLES: MUSCLES as unknown as Num,
   GAIT: GAIT as unknown as Num,
   EMOTION: EMOTION as unknown as Num,

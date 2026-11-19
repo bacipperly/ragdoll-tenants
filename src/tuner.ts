@@ -82,6 +82,13 @@ function buildEntries(): Record<string, Entry[]> {
       { path: 'BUTT.travel', label: 'max wobble', min: 0, max: 0.8, step: 0.01 },
       { path: 'BUTT.walkBounce', label: 'walk bounce', min: 0, max: 0.8, step: 0.01 },
     ],
+    'Face drawing': [
+      { path: 'FACE.line', label: 'line thickness', min: 0.001, max: 0.006, step: 0.0002 },
+      { path: 'FACE.mouthWidth', label: 'mouth width', min: 0.012, max: 0.045, step: 0.001 },
+      { path: 'FACE.smileDepth', label: 'smile depth', min: 0, max: 0.03, step: 0.001 },
+      { path: 'FACE.mouthOpen', label: 'open mouth drop', min: 0.01, max: 0.07, step: 0.001 },
+      { path: 'FACE.glint', label: 'eye sparkle', min: 0, max: 0.6, step: 0.01 },
+    ],
     'Carrying': [
       { path: 'CARRY.loadFeel', label: 'feels the weight (sag)', min: 0, max: 1, step: 0.01 },
       { path: 'CARRY.wobble', label: 'rocks under it (rad)', min: 0, max: 0.4, step: 0.005 },

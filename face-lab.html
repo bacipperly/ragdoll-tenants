@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Face Lab</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #cfd8dc; font-family: system-ui, sans-serif; }
+      canvas { display: block; }
+      #labels { position: fixed; inset: 0; pointer-events: none; }
+      #labels div { position: absolute; transform: translateX(-50%); font-size: 11px; color: #37474f; white-space: nowrap; }
+      #controls { position: fixed; top: 8px; right: 8px; display: flex; gap: 6px; }
+      #controls button { font: inherit; font-size: 12px; padding: 4px 10px; }
+    </style>
+  </head>
+  <body>
+    <div id="labels"></div>
+    <div id="controls">
+      <button data-page="moods">Moods</button>
+      <button data-page="strips">Transitions</button>
+      <button data-page="live">Live</button>
+    </div>
+    <script type="module" src="/src/faceLab.ts"></script>
+  </body>
+</html>

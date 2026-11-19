@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SKIN } from './config';
+import { FACE, SKIN } from './config';
 import { blendedSkin, type Shape } from './blendskin';
 import type { BodyDims, FaceShape } from './proportions';
 import { NEUTRAL, type FaceLetter, type Letters } from './mood';
@@ -112,74 +112,191 @@ function buildSkin(bone: BoneIndex, B: BodyDims): THREE.BufferGeometry {
   return blendedSkin(shapes, 0.006 * size, bone('__count'));
 }
 
-// ---- The face: rigid little meshes that ride on the head bone ----
+// ---- The face: shapes drawn on the head that change shape rather than swap ----
+/*
+ * Each piece of the face (an eye, the mouth, a brow) is one outline drawn onto the head:
+ * a top edge and a bottom edge, sampled at the same points across. Expressions only move
+ * those edges, so a blink is the lid coming down, smile ↔ line ↔ frown is one mouth
+ * bending, and an "o" is that same mouth dropping open. Nothing pops in or out: brows and
+ * blush fade in, the tongue slides out from under the lip, the sparkle hides under the lid.
+ */
 
-const faceMaterial = new THREE.MeshStandardMaterial({ color: 0x1b1b2f, roughness: 0.55 });
-const eyeGeometry = new THREE.SphereGeometry(1, 12, 10);
-/** A small arc, used for the smile and for closed eyes. The arc is centred on its bottom. */
-const arcGeometry = new THREE.TorusGeometry(1, 0.17, 6, 18, Math.PI * 0.6);
-arcGeometry.rotateZ(Math.PI + Math.PI * 0.2); // the torus arc starts at +x; turn it to hang at the bottom
+const INK = 0x1b1b2f;
+/** Drawn just above the head and pulled forward in depth, so the goo never covers it. */
+const decal = (factor: number) => ({ side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: factor, polygonOffsetUnits: 2 * factor });
+const inkMaterial = new THREE.MeshStandardMaterial({ color: INK, roughness: 0.55, ...decal(-2) });
+const tongueMaterial = new THREE.MeshStandardMaterial({ color: 0xff6f91, roughness: 0.5, ...decal(-1) });
+const glintMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, ...decal(-3) });
+/** How far above the head each layer is drawn: blush under the tongue under the ink under the sparkle. */
+const LIFT = { blush: 0.0015, tongue: 0.0022, ink: 0.003, glint: 0.0036 };
 
-const EYE_OPEN = new THREE.Vector3(0.021, 0.046, 0.012);
-const SMILE_SCALE = 0.032;
-/** The mouth's half-sizes: a closed line, the slack jaw when out cold, a surprised "o". */
-const MOUTH_Y = -0.058;
-const LINE_MOUTH = { x: 0.018, y: 0.0038 };
-const SLACK_MOUTH = { x: 0.016, y: 0.021 };
-const OPEN_MOUTH = { x: 0.017, y: 0.025 };
-const BROW = new THREE.Vector3(0.05, 0.0095, 0.006);
-const browGeometry = new THREE.CapsuleGeometry(0.5, 1, 2, 6).rotateZ(Math.PI / 2); // a rounded bar along x
 /** A thin bar along +x starting at its origin, for lashes (so it can be rotated about its root). */
 const lashGeometry = new THREE.CapsuleGeometry(0.5, 1, 2, 5).rotateZ(Math.PI / 2).translate(0.75, 0, 0);
-const tongueMaterial = new THREE.MeshStandardMaterial({ color: 0xff6f91, roughness: 0.5 });
-const blushMaterial = new THREE.MeshStandardMaterial({ color: 0xff7aa2, roughness: 0.8, transparent: true, opacity: 0.75 });
-/** Where on each eye's outline the lashes grow (radians from "outward", toward "up"), and how long each is. */
+/** Where on each eye's top edge the lashes grow (radians from "outward", toward "up"), and how long each is. */
 const LASHES = [[0.35, 0.8], [0.75, 1], [1.15, 0.85]] as const;
 const DEFAULT_FACE: FaceShape = { eyeSize: 1, eyeSpacing: 1, eyeHeight: 0, lashes: 0, blush: 0, mouthWidth: 1 };
+const MOUTH_Y = -0.058;
+/** The open eye's half-sizes, before the character's eye size. */
+const EYE = { w: 0.021, h: 0.046 };
 
-/** Where a face feature sits: its rest spot on the face, how far it's sunk in, and the object to move. */
-interface Feature { obj: THREE.Object3D; x: number; y: number; inset: number }
+/** Samples across a shape (−1..1), bunched toward the ends so they stay round. */
+const N = 16;
+const U = Float32Array.from({ length: N + 1 }, (_, i) => -Math.cos((Math.PI * i) / N));
+/** The height of a unit circle at each sample: an ellipse's profile. */
+const E = Float32Array.from(U, (u) => Math.sqrt(Math.max(0, 1 - u * u)));
+/**
+ * Rows from the top edge down to the bottom one: tall shapes need a few, or their middle
+ * cuts a straight chord under the round head and the skin shows through.
+ */
+const ROWS = 3;
+/** Triangles row by row: vertex (row j, sample i) is j·(N+1) + i, row 0 the top edge. */
+const OUTLINE_INDEX = (() => {
+  const idx: number[] = [];
+  for (let j = 0; j < ROWS; j++) {
+    for (let i = 0; i < N; i++) {
+      const t = j * (N + 1) + i, b = t + N + 1;
+      idx.push(t, b, t + 1, t + 1, b, b + 1);
+    }
+  }
+  return idx;
+})();
+
+/**
+ * Half-thickness of a stroke with round ends at `u` along it: `th` through the middle,
+ * closing in a half circle over the last `th` of its half-length `half`.
+ */
+function stroke(u: number, th: number, half: number): number {
+  const rho = Math.min(1, th / Math.max(half, 1e-6));
+  const over = Math.abs(u) - (1 - rho);
+  if (over <= 0) return th;
+  const t = over / rho;
+  return th * Math.sqrt(Math.max(0, 1 - t * t));
+}
+
+/**
+ * One piece of the face: a filled outline between a top and a bottom edge (N+1 points
+ * each, in face coordinates), wrapped onto the head and redrawn whenever it changes.
+ */
+class Outline {
+  readonly mesh: THREE.Mesh;
+  readonly tx = new Float32Array(N + 1);
+  readonly ty = new Float32Array(N + 1);
+  readonly bx = new Float32Array(N + 1);
+  readonly by = new Float32Array(N + 1);
+  private readonly pos: THREE.BufferAttribute;
+  private readonly nrm: THREE.BufferAttribute;
+
+  constructor(material: THREE.Material, private readonly lift: number) {
+    const g = new THREE.BufferGeometry();
+    this.pos = new THREE.BufferAttribute(new Float32Array((ROWS + 1) * (N + 1) * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    this.nrm = new THREE.BufferAttribute(new Float32Array((ROWS + 1) * (N + 1) * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute('position', this.pos);
+    g.setAttribute('normal', this.nrm);
+    g.setIndex(OUTLINE_INDEX);
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 0.1);
+    this.mesh = new THREE.Mesh(g, material);
+    this.mesh.frustumCulled = false;
+  }
+
+  /** Writes the edges onto the head (radius r), relative to the mesh's spot at (cx, cy). */
+  commit(cx: number, cy: number, r: number): void {
+    const cz = surfaceZ(cx, cy, r);
+    for (let j = 0; j <= ROWS; j++) {
+      const t = j / ROWS;
+      for (let i = 0; i <= N; i++) {
+        const x = this.tx[i] + (this.bx[i] - this.tx[i]) * t, y = this.ty[i] + (this.by[i] - this.ty[i]) * t;
+        const xy = x * x + y * y, z = xy < r * r ? Math.sqrt(r * r - xy) : 0;
+        const len = xy < r * r ? r : Math.sqrt(xy) || 1; // on the sphere, the radius
+        const nx = x / len, ny = y / len, nz = z / len, k = j * (N + 1) + i;
+        this.pos.setXYZ(k, x + nx * this.lift - cx, y + ny * this.lift - cy, z + nz * this.lift - cz);
+        this.nrm.setXYZ(k, nx, ny, nz);
+      }
+    }
+    this.pos.needsUpdate = true;
+    this.nrm.needsUpdate = true;
+  }
+
+  dispose(): void {
+    this.mesh.geometry.dispose();
+  }
+}
+
+/** Height of the head's front surface above (x, y). */
+function surfaceZ(x: number, y: number, r: number): number {
+  return Math.sqrt(Math.max(0, r * r - x * x - y * y));
+}
+
+/**
+ * A soft rosy patch on the cheek: solid in the middle, fading out at the rim. Built once,
+ * wrapped onto the head at (cx, cy).
+ */
+function blushPatch(cx: number, cy: number, r: number): THREE.BufferGeometry {
+  const RX = 0.03, RY = 0.019, SEG = 20;
+  const rings = [[0, 0.9], [0.55, 0.75], [1, 0]] as const; // [radius share, opacity]
+  const pos: number[] = [], nrm: number[] = [], col: number[] = [], idx: number[] = [];
+  const cz = surfaceZ(cx, cy, r);
+  for (const [k, a] of rings) {
+    const n = k === 0 ? 1 : SEG;
+    for (let s = 0; s < n; s++) {
+      const t = (2 * Math.PI * s) / SEG;
+      const x = cx + RX * k * Math.cos(t), y = cy + RY * k * Math.sin(t), z = surfaceZ(x, y, r);
+      const len = Math.hypot(x, y, z);
+      pos.push(x + (x / len) * LIFT.blush - cx, y + (y / len) * LIFT.blush - cy, z + (z / len) * LIFT.blush - cz);
+      nrm.push(x / len, y / len, z / len);
+      col.push(1, 1, 1, a);
+    }
+  }
+  for (let s = 0; s < SEG; s++) {
+    const s1 = (s + 1) % SEG;
+    idx.push(0, 1 + s, 1 + s1);
+    const a = 1 + s, b = 1 + s1, c = 1 + SEG + s, d = 1 + SEG + s1;
+    idx.push(a, c, b, b, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+  g.setIndex(idx);
+  return g;
+}
+
+interface Eye {
+  ink: Outline; glint: Outline; x: number; y: number; side: number;
+  /** A frame lying flat on the face at the eye's centre, holding its lashes. */
+  lashFrame: THREE.Group; lashes: THREE.Mesh[];
+}
 
 /**
  * The face, as in the drawing: tall oval eyes and a small smile on the +z side of the
  * head. It rides on the head bone, so positions are relative to the head's centre.
  *
  * It's driven by the face letters (see mood.ts): smile, mouthOpen, eyeOpen, brows, gaze,
- * blush, and the concentrating ones (lopsided, mouthShift, tongue), plus `awake` (0 = out cold: eyes shut to curves, the jaw slack), which
- * overrides the rest as it drops.
+ * blush, and the concentrating ones (lopsided, mouthShift, tongue), plus `awake` (0 = out
+ * cold: eyes shut to curves, the jaw slack), which overrides the rest as it drops.
  */
 export class Face {
   readonly root = new THREE.Group();
   private readonly shape: FaceShape;
   private readonly r: number;
-  /** Things that move with the gaze: open eyes, shut eyes, lash frames. */
-  private readonly gazers: Feature[] = [];
-  private readonly eyesOpen: THREE.Mesh[] = [];
-  private readonly eyesShut: THREE.Mesh[] = [];
-  private readonly brows: { mesh: THREE.Mesh; side: number; base: THREE.Quaternion; x: number; y: number }[] = [];
-  /** Per eye: a frame lying flat on the face at the eye's centre, holding its lashes. */
-  private readonly lashSets: { frame: THREE.Group; lashes: THREE.Mesh[]; side: number }[] = [];
-  private readonly cheeks: THREE.Mesh[] = [];
-  private readonly smile: THREE.Mesh;
-  private readonly frown: THREE.Mesh;
-  /** One mouth: a flat line that opens into an "o" (smile and frown arcs replace it). */
-  private readonly mouth: THREE.Mesh;
-  private readonly mouthQ: THREE.Quaternion;
-  /** The tip of the tongue, poking out of the corner of the mouth when concentrating. */
-  private readonly tongue: THREE.Mesh;
   /**
    * Which side this face favours when it goes lopsided (+1 or −1): the eye that squints
    * harder and the corner the mouth slides to. Each tenant has its own.
    */
   private readonly side: number;
-  private readonly tilt = new THREE.Quaternion();
-  private readonly zAxis = new THREE.Vector3(0, 0, 1);
+  private readonly eyes: Eye[] = [];
+  private readonly brows: { ink: Outline; x: number; y: number; side: number }[] = [];
+  private readonly cheeks: THREE.Mesh[] = [];
+  private readonly mouth: Outline;
+  private readonly tongue: Outline;
+  /** This face's own, so its brows and blush can fade without touching anyone else's. */
+  private readonly browMaterial: THREE.MeshStandardMaterial;
+  private readonly blushMaterial: THREE.MeshStandardMaterial;
   /**
-   * Where each feature sits before the goo moves it: set when placed, and every frame
-   * for the ones that move about the face (eyes with the gaze, brows up and down).
+   * Where each piece sits before the goo moves it: set when placed, and every frame for
+   * the ones that move about the face (eyes with the gaze, brows, the mouth).
    */
   private readonly bases = new Map<THREE.Object3D, THREE.Vector3>();
-  /** The goo surface the features ride on, which vertex each one rides, and the face's scale. */
+  /** The goo surface the pieces ride on, which vertex each one rides, and the face's scale. */
   private goo: GooHead | null = null;
   private readonly riding = new Map<THREE.Object3D, number>();
   private gooScale = 1;
@@ -188,64 +305,50 @@ export class Face {
     this.shape = shape;
     this.side = side < 0 ? -1 : 1;
     this.r = r;
-    const flatOnFace = (m: THREE.Object3D) => m.lookAt(m.position.clone().multiplyScalar(2));
-    const place = (m: THREE.Object3D, x: number, y: number, inset: number) => {
-      m.position.set(x, y, this.onSurface(x, y) - inset);
-      flatOnFace(m);
-      this.root.add(m);
-      this.bases.set(m, m.position.clone());
+    this.browMaterial = new THREE.MeshStandardMaterial({ color: INK, roughness: 0.55, transparent: true, ...decal(-2) });
+    this.blushMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff7aa2, roughness: 0.8, transparent: true, vertexColors: true, depthWrite: false, ...decal(-1),
+    });
+    const anchor = (obj: THREE.Object3D, x: number, y: number) => {
+      obj.position.set(x, y, surfaceZ(x, y, r));
+      this.root.add(obj);
+      this.bases.set(obj, obj.position.clone());
     };
     const eyeY = 0.02 + shape.eyeHeight * r;
     for (const sx of [1, -1]) {
-      const x = sx * 0.072 * shape.eyeSpacing, y = eyeY;
-      const open = new THREE.Mesh(eyeGeometry, faceMaterial);
-      place(open, x, y, 0.004);
-      this.eyesOpen.push(open);
-      this.gazers.push({ obj: open, x, y, inset: 0.004 });
-      // Shut: a little downward curve, lower than the open eye's middle, like a sleeping face.
-      const shut = new THREE.Mesh(arcGeometry, faceMaterial);
-      place(shut, x, y - 0.004, 0.001);
-      this.eyesShut.push(shut);
-      this.gazers.push({ obj: shut, x, y: y - 0.004, inset: 0.001 });
-      // Lashes: a frame flat on the face at the eye's centre; the lashes are placed on the
-      // eye's outline every frame, so they ride the lid as it blinks or squints.
-      const frame = new THREE.Group();
-      place(frame, x, y, 0);
-      const lashes = LASHES.map(() => new THREE.Mesh(lashGeometry, faceMaterial));
-      for (const l of lashes) frame.add(l);
-      this.lashSets.push({ frame, lashes, side: sx });
-      this.gazers.push({ obj: frame, x, y, inset: 0 });
-      // Blush: a rosy patch on each cheek, below and outside the eye.
-      const cheek = new THREE.Mesh(eyeGeometry, blushMaterial);
-      place(cheek, sx * 0.112 * shape.eyeSpacing, eyeY - 0.06, 0.002);
+      const x = sx * 0.072 * shape.eyeSpacing;
+      const ink = new Outline(inkMaterial, LIFT.ink);
+      anchor(ink.mesh, x, eyeY);
+      const glint = new Outline(glintMaterial, LIFT.glint);
+      anchor(glint.mesh, x, eyeY);
+      const lashFrame = new THREE.Group();
+      anchor(lashFrame, x, eyeY);
+      lashFrame.lookAt(lashFrame.position.clone().multiplyScalar(2)); // flat on the face
+      const lashes = LASHES.map(() => new THREE.Mesh(lashGeometry, inkMaterial));
+      for (const l of lashes) lashFrame.add(l);
+      this.eyes.push({ ink, glint, x, y: eyeY, side: sx, lashFrame, lashes });
+
+      // Blush: a soft rosy patch on each cheek, below and outside the eye.
+      const cx = sx * 0.112 * shape.eyeSpacing, cy = eyeY - 0.06;
+      const cheek = new THREE.Mesh(blushPatch(cx, cy, r), this.blushMaterial);
+      anchor(cheek, cx, cy);
       this.cheeks.push(cheek);
+
       // Brows: hidden unless a mood or reaction shows them (the drawing has none).
-      const brow = new THREE.Mesh(browGeometry, faceMaterial);
+      const brow = new Outline(this.browMaterial, LIFT.ink);
       const bx = sx * 0.07 * shape.eyeSpacing, by = eyeY + 0.058 * shape.eyeSize;
-      place(brow, bx, by, 0.001);
-      this.brows.push({ mesh: brow, side: sx, base: brow.quaternion.clone(), x: bx, y: by });
+      anchor(brow.mesh, bx, by);
+      this.brows.push({ ink: brow, x: bx, y: by, side: sx });
     }
-    this.smile = new THREE.Mesh(arcGeometry, faceMaterial);
-    this.smile.position.set(0, -0.03, this.onSurface(0, -0.06) - 0.002);
-    this.root.add(this.smile);
-    this.bases.set(this.smile, this.smile.position.clone());
-    // Frown: the same arc turned upside down.
-    this.frown = new THREE.Mesh(arcGeometry, faceMaterial);
-    this.frown.rotation.z = Math.PI;
-    this.frown.position.set(0, -0.085, this.onSurface(0, -0.06) - 0.002);
-    this.root.add(this.frown);
-    this.bases.set(this.frown, this.frown.position.clone());
-    // The mouth: a flat line that opens into a round "o" in place.
-    this.mouth = new THREE.Mesh(eyeGeometry, faceMaterial);
-    place(this.mouth, 0, MOUTH_Y, 0.003);
-    this.mouthQ = this.mouth.quaternion.clone();
-    this.tongue = new THREE.Mesh(eyeGeometry, tongueMaterial);
-    place(this.tongue, 0, MOUTH_Y - 0.006, 0.0015);
+    this.mouth = new Outline(inkMaterial, LIFT.ink);
+    anchor(this.mouth.mesh, 0, MOUTH_Y);
+    this.tongue = new Outline(tongueMaterial, LIFT.tongue);
+    anchor(this.tongue.mesh, 0, MOUTH_Y);
     this.setExpression(1, NEUTRAL);
   }
 
   /**
-   * Rides the face on a goo head: each feature follows the goo vertex under it, so the
+   * Rides the face on a goo head: each piece follows the goo vertex under it, so the
    * face smears, flattens and sloshes with the glop. `scale` is the face's own scale
    * (the goo moves in real units; the face is laid out for the drawn head).
    */
@@ -257,7 +360,7 @@ export class Face {
     this.followSurface();
   }
 
-  /** Puts every feature at its base spot plus the goo's offset there. */
+  /** Puts every piece at its base spot plus the goo's offset there. */
   followSurface(): void {
     const u = this.goo?.offset;
     for (const [obj, base] of this.bases) {
@@ -271,121 +374,184 @@ export class Face {
     }
   }
 
-  private onSurface(x: number, y: number): number {
-    return Math.sqrt(Math.max(0, this.r * this.r - x * x - y * y));
+  dispose(): void {
+    for (const e of this.eyes) { e.ink.dispose(); e.glint.dispose(); }
+    for (const b of this.brows) b.ink.dispose();
+    for (const c of this.cheeks) c.geometry.dispose();
+    this.mouth.dispose();
+    this.tongue.dispose();
+    this.browMaterial.dispose();
+    this.blushMaterial.dispose();
   }
 
-  /** Puts each eye's lashes on the upper-outer edge of its current (squashed) oval. */
-  private placeLashes(halfW: number, halfH: number, show: number): void {
-    const len = 0.02 * this.shape.lashes * this.shape.eyeSize;
-    for (const set of this.lashSets) {
-      set.frame.visible = this.shape.lashes > 0.01 && show > 0.05;
-      if (!set.frame.visible) continue;
-      set.lashes.forEach((l, i) => {
-        const [a, k] = LASHES[i];
-        // Point on the oval (outward = +x for the eye on +x, mirrored for the other)...
-        const cx = set.side * Math.cos(a) * halfW, cy = Math.sin(a) * halfH;
-        l.position.set(cx, cy, 0.002);
-        // ...pointing out from it, flicked a little further outward.
-        l.rotation.z = Math.atan2(Math.sin(a) * halfW, set.side * Math.cos(a) * halfH) + set.side * -0.25;
-        l.scale.set(len * k * show, 0.004, 0.004);
-      });
-    }
+  /** Feelings only show while it's awake: each letter blends back toward neutral as it drops. */
+  private alert = 1;
+  private letters: Letters = NEUTRAL;
+  private readonly letter = (k: FaceLetter) => NEUTRAL[k] + (this.letters[k] - NEUTRAL[k]) * this.alert;
+
+  /** The bottom lip's height at u across a mouth of half-width w (before tilting). */
+  private static lowerLip(u: number, depth: number, line: number, w: number, open: number): number {
+    return depth * (u * u - 0.5) - stroke(u, line, w) - open * Math.sqrt(Math.max(0, 1 - u * u));
+  }
+
+  /** Redraws an outline whose edges are filled in, anchored at (cx, cy). */
+  private draw(o: Outline, cx: number, cy: number): void {
+    this.bases.get(o.mesh)!.set(cx, cy, surfaceZ(cx, cy, this.r));
+    o.commit(cx, cy, this.r);
   }
 
   /**
    * @param awake 1 = awake, 0 = out cold (eyes shut, jaw slack). Blends in between.
    * @param f the face letters (see mood.ts).
+   * @param blink 0..1, how far the lids are down for a blink (eyes only).
    */
-  setExpression(awake: number, f: Letters): void {
-    const { smoothstep } = THREE.MathUtils;
-    // Eyes: the open ovals squash shut, and the closed curves appear only near the end,
-    // so a blink reads as the lid coming down rather than two shapes crossfading.
-    const open = smoothstep(awake, 0.1, 0.9);
-    const shut = 1 - smoothstep(awake, 0, 0.25);
-    // Feelings only show while it's awake: blend every letter back toward neutral as it drops.
-    const alert = smoothstep(awake, 0.3, 0.9);
-    const L = (k: FaceLetter) => NEUTRAL[k] + (f[k] - NEUTRAL[k]) * alert;
-
-    // Gaze: everything eye-shaped slides together across the face.
-    const gx = L('gazeX') * 0.016, gy = L('gazeY') * 0.012;
-    for (const g of this.gazers) {
-      const x = g.x + gx, y = g.y + gy;
-      this.bases.get(g.obj)!.set(x, y, this.onSurface(x, y) - g.inset);
-    }
-
+  setExpression(awake: number, f: Letters, blink = 0): void {
+    const { smoothstep, lerp } = THREE.MathUtils;
+    this.alert = smoothstep(awake, 0.3, 0.9);
+    const L = this.letter;
+    this.letters = f;
     const es = this.shape.eyeSize;
+    // How far the lids are down: 0 open, 1 shut.
+    const shut = Math.max(blink, 1 - smoothstep(awake, 0.05, 0.95));
+
+    // ---- Eyes: an open oval whose top lid comes down (and bottom lid up a little) to
+    // meet in the sleepy downward curve of a shut eye.
+    const gx = L('gazeX') * 0.016, gy = L('gazeY') * 0.012;
     const eo = L('eyeOpen');
-    // Wide: taller and much rounder. Narrowed: half-lidded down to a slit.
-    const eyeW = EYE_OPEN.x * es * (1 + 0.4 * Math.max(0, eo));
-    const eyeH = EYE_OPEN.y * es * open * (eo >= 0 ? 1 + 0.1 * eo : 1 + 0.6 * eo);
     // Lopsided: the favoured side's eye squints harder, the other opens a touch.
     const lop = L('lopsided') * this.side;
-    this.eyesOpen.forEach((m, i) => {
-      const s = i === 0 ? 1 : -1; // eyes are made +x first
-      const k = s * lop;
-      // Squeezed to a slit (and a touch wider) on the squinting side.
-      const squash = k > 0 ? Math.max(0.2, 1 - 1.05 * k) : 1 - 0.15 * k;
-      m.scale.set(eyeW * (1 + 0.2 * Math.max(0, k)), eyeH * squash, EYE_OPEN.z);
-      m.visible = open > 0.02;
-    });
-    for (const m of this.eyesShut) {
-      m.scale.setScalar(0.022 * es * shut);
-      m.visible = shut > 0.02;
-    }
-    this.placeLashes(eyeW, eyeH, Math.max(open, 0.6 * shut));
+    const th = FACE.line * es * 1.25;
+    for (const e of this.eyes) {
+      const k = e.side * lop;
+      // Wide: taller and much rounder. Narrowed: half-lidded down to a slit.
+      const W = EYE.w * es * (1 + 0.4 * Math.max(0, eo)) * (1 + 0.2 * Math.max(0, k));
+      const H = EYE.h * es * (eo >= 0 ? 1 + 0.1 * eo : 1 + 0.6 * eo) * (k > 0 ? Math.max(0.2, 1 - 1.05 * k) : 1 - 0.15 * k);
+      // Shut: a little curve, lower than the open eye's middle, like a sleeping face.
+      const w = lerp(W, 0.019 * es, shut);
+      const cx = e.x + gx, cy = e.y + gy;
+      const o = e.ink;
+      for (let i = 0; i <= N; i++) {
+        const c = stroke(U[i], th, w);
+        const mid = -0.002 * es - 0.008 * es * E[i] * E[i];
+        let top = lerp(H * E[i], mid + c, shut);
+        let bot = lerp(-H * E[i], mid - c, shut * shut);
+        if (top - bot < 2 * c) { const m = (top + bot) / 2; top = m + c; bot = m - c; }
+        o.tx[i] = o.bx[i] = cx + w * U[i];
+        o.ty[i] = cy + top;
+        o.by[i] = cy + bot;
+      }
+      this.draw(o, cx, cy);
 
-    // Brows: height and angle. A positive turn about the face's z drops the inner (−x)
-    // end of the +x brow (cross); negative lifts it (sad/worried). Mirrored per side.
-    const browShow = L('browShow');
+      // Sparkle: a white dot high on the eye, on the same side for both eyes (where the
+      // light comes from). It shrinks away as the lid comes down over it.
+      const g = FACE.glint * W * (1 - shut) * (1 - shut) * Math.min(1, H / (EYE.h * es));
+      const gpx = cx - 0.3 * W, gpy = cy + 0.42 * H * (1 - shut);
+      const s = e.glint;
+      s.mesh.visible = g > 0.0008;
+      if (s.mesh.visible) {
+        for (let i = 0; i <= N; i++) {
+          s.tx[i] = s.bx[i] = gpx + g * U[i];
+          s.ty[i] = gpy + g * E[i];
+          s.by[i] = gpy - g * E[i];
+        }
+        this.draw(s, gpx, gpy);
+      }
+
+      // Lashes ride the top lid's outer edge, pointing out from it.
+      const lashes = this.shape.lashes;
+      e.lashFrame.visible = lashes > 0.01;
+      this.bases.get(e.lashFrame)!.set(cx, cy, surfaceZ(cx, cy, this.r));
+      if (e.lashFrame.visible) {
+        const len = 0.02 * lashes * es * (1 - 0.4 * shut);
+        const cz = surfaceZ(cx, cy, this.r);
+        for (let j = 0; j < LASHES.length; j++) {
+          const l = e.lashes[j], [a, size] = LASHES[j];
+          const u = e.side * Math.cos(a);
+          const i = Math.min(N - 1, Math.max(1, Math.round((Math.acos(-u) / Math.PI) * N)));
+          const px = o.tx[i], py = o.ty[i];
+          const dx = o.tx[i + 1] - o.tx[i - 1], dy = o.ty[i + 1] - o.ty[i - 1];
+          l.position.set(px - cx, py - cy, surfaceZ(px, py, this.r) - cz + LIFT.ink);
+          l.rotation.z = Math.atan2(dx, -dy) + e.side * -0.25;
+          l.scale.set(len * size, 0.004, 0.004);
+        }
+      }
+    }
+
+    // ---- Brows: tapered strokes that fade in (rising a little as they come), then
+    // move up and down and tilt. Turning a +x brow anticlockwise drops its inner end
+    // (cross); clockwise lifts it (sad/worried). Mirrored per side.
+    const browShow = Math.min(1, L('browShow'));
+    this.browMaterial.opacity = browShow;
     for (const b of this.brows) {
-      this.tilt.setFromAxisAngle(this.zAxis, b.side * 0.5 * L('browAngle'));
-      b.mesh.quaternion.copy(b.base).multiply(this.tilt);
-      const y = b.y + 0.016 * L('browHeight') - 0.012 * b.side * lop;
-      this.bases.get(b.mesh)!.set(b.x, y, this.onSurface(b.x, y) - 0.001);
-      b.mesh.scale.set(BROW.x * browShow, BROW.y * browShow, BROW.z);
-      b.mesh.visible = browShow > 0.02;
+      const o = b.ink;
+      o.mesh.visible = browShow > 0.01;
+      if (!o.mesh.visible) continue;
+      const ang = b.side * 0.5 * L('browAngle'), cos = Math.cos(ang), sin = Math.sin(ang);
+      const cx = b.x, cy = b.y + 0.016 * L('browHeight') - 0.012 * b.side * lop - 0.008 * (1 - browShow);
+      const half = 0.026 * (0.85 + 0.15 * browShow), bt = 0.0048;
+      for (let i = 0; i <= N; i++) {
+        const x = half * U[i], arch = 0.003 * E[i] * E[i];
+        const c = stroke(U[i], bt, half) * (1 - 0.4 * Math.max(0, U[i] * b.side)); // thinner at the outer end
+        o.tx[i] = cx + x * cos - (arch + c) * sin; o.ty[i] = cy + x * sin + (arch + c) * cos;
+        o.bx[i] = cx + x * cos - (arch - c) * sin; o.by[i] = cy + x * sin + (arch - c) * cos;
+      }
+      this.draw(o, cx, cy);
     }
 
-    // Blush: the character's own, plus any from the mood.
+    // ---- Blush: the character's own, plus any from the mood. Fades rather than grows.
     const blush = Math.min(1.2, this.shape.blush + L('blush'));
+    this.blushMaterial.opacity = 0.85 * Math.min(1, blush);
     for (const c of this.cheeks) {
-      c.scale.set(0.03 * blush, 0.019 * blush, 0.004);
-      c.visible = blush > 0.02;
+      c.visible = blush > 0.01;
+      c.scale.setScalar(0.85 + 0.15 * Math.min(1.2, blush));
     }
 
-    // Mouth: smile ↔ straight line ↔ frown, plus an open "o" (slack when out cold).
+    // ---- Mouth: one stroke. Smiling bends it up at the corners, frowning down; opening
+    // drops the bottom lip (and lifts the top a touch), so a straight face opens into an
+    // "o" and a smile into a grin. Out cold, the jaw hangs slack.
     const mw = this.shape.mouthWidth;
     const sm = L('smile') * smoothstep(awake, 0.3, 1);
-    const smile = Math.max(0, sm), frown = Math.max(0, -sm);
-    const line = Math.max(0, 1 - 2 * Math.abs(sm)) * open;
-    this.smile.scale.set(SMILE_SCALE * mw * (0.6 + 0.4 * smile), SMILE_SCALE * smile, SMILE_SCALE);
-    this.smile.visible = smile > 0.02;
-    this.frown.scale.set(SMILE_SCALE * mw * 0.9 * frown, SMILE_SCALE * 0.7 * frown, SMILE_SCALE);
-    this.frown.visible = frown > 0.02;
-    // The line and the "o" are one shape: it opens from a flat line into an oval, in place,
-    // and the line part fades as a smile or frown takes over.
     const slack = 1 - smoothstep(awake, 0, 0.6);
-    const oh = Math.min(1, Math.max(slack, L('mouthOpen')));
-    const ox = THREE.MathUtils.lerp(SLACK_MOUTH.x, OPEN_MOUTH.x, 1 - slack) * Math.sqrt(mw);
-    const oy = THREE.MathUtils.lerp(SLACK_MOUTH.y, OPEN_MOUTH.y, 1 - slack);
-    const lx = LINE_MOUTH.x * mw * line, ly = LINE_MOUTH.y * line;
-    this.mouth.scale.set(Math.max(lx * (1 - oh), 0) + ox * oh, Math.max(ly * (1 - oh), 0) + oy * oh, 0.008);
-    this.mouth.visible = Math.max(line, oh) > 0.02;
-
+    const op = Math.min(1, Math.max(slack, L('mouthOpen')));
     // Concentrating: the mouth slides off to one side, scrunched shorter and tilted up at
     // that corner, and the tip of the tongue pokes out of it.
     const shift = L('mouthShift') * this.side;
-    const mx = 0.022 * shift;
-    this.bases.get(this.mouth)!.set(mx, MOUTH_Y, this.onSurface(mx, MOUTH_Y) - 0.003);
-    this.tilt.setFromAxisAngle(this.zAxis, 0.35 * shift);
-    this.mouth.quaternion.copy(this.mouthQ).multiply(this.tilt);
-    this.mouth.scale.x *= 1 - 0.2 * Math.abs(shift);
-    const tongue = L('tongue') * smoothstep(awake, 0.5, 1);
-    const tx = mx + Math.sign(shift || this.side) * 0.55 * this.mouth.scale.x, ty = MOUTH_Y - 0.007 + 0.004 * Math.abs(shift);
-    this.bases.get(this.tongue)!.set(tx, ty, this.onSurface(tx, ty) - 0.0015);
-    this.tongue.scale.set(0.013 * tongue * Math.sqrt(mw), 0.015 * tongue, 0.007);
-    this.tongue.visible = tongue > 0.02;
+    const round = op * (1 - Math.min(1, 1.5 * Math.abs(sm))); // how much it's an "o" rather than a grin
+    const W = lerp(FACE.mouthWidth * mw * (1 - 0.15 * Math.max(0, -sm)), 0.017 * Math.sqrt(mw), round) * (1 - 0.2 * Math.abs(shift));
+    const depth = FACE.smileDepth * sm;
+    const Ho = FACE.mouthOpen * op * (1 - 0.2 * slack);
+    const mt = FACE.line;
+    const ang = 0.35 * shift, cos = Math.cos(ang), sin = Math.sin(ang);
+    const mx = 0.022 * shift, my = MOUTH_Y;
+    const m = this.mouth;
+    for (let i = 0; i <= N; i++) {
+      const x = W * U[i];
+      const top = depth * (U[i] * U[i] - 0.5) + stroke(U[i], mt, W) + 0.25 * Ho * E[i];
+      const bot = Face.lowerLip(U[i], depth, mt, W, Ho);
+      m.tx[i] = mx + x * cos - top * sin; m.ty[i] = my + x * sin + top * cos;
+      m.bx[i] = mx + x * cos - bot * sin; m.by[i] = my + x * sin + bot * cos;
+    }
+    this.draw(m, mx, my);
+
+    // Tongue: hangs from the bottom lip toward the corner the mouth slid to, tucked under
+    // the lip's ink so it grows out from behind it.
+    const tg = L('tongue') * smoothstep(awake, 0.5, 1);
+    const t = this.tongue;
+    t.mesh.visible = tg > 0.01;
+    if (t.mesh.visible) {
+      const dir = Math.sign(shift) || this.side;
+      const tw = Math.min(0.009 * Math.sqrt(mw), 0.45 * W);
+      const uc = dir * (0.85 - tw / W);
+      const len = 0.022 * tg;
+      for (let i = 0; i <= N; i++) {
+        const x = uc * W + tw * U[i];
+        const lip = Face.lowerLip(x / W, depth, mt, W, Ho);
+        const top = lip + 0.8 * mt, bot = lip - len * E[i];
+        t.tx[i] = mx + x * cos - top * sin; t.ty[i] = my + x * sin + top * cos;
+        t.bx[i] = mx + x * cos - bot * sin; t.by[i] = my + x * sin + bot * cos;
+      }
+      this.draw(t, mx, my);
+    }
     this.followSurface();
   }
 }

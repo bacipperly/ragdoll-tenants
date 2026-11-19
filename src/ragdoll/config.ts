@@ -271,6 +271,20 @@ export const CARRY = {
 };
 
 /** Moods: how it reacts to being shoved. */
+/** How the face is drawn (sizes in head units; the head's radius is 0.2). */
+export const FACE = {
+  /** Half-thickness of the drawn lines: the mouth, and shut eyes (a touch thicker). */
+  line: 0.0028,
+  /** Half-width of the mouth at rest (× the character's mouth width). */
+  mouthWidth: 0.026,
+  /** How far a full smile (or frown) bends the mouth's corners. */
+  smileDepth: 0.012,
+  /** How far a fully open mouth drops. */
+  mouthOpen: 0.04,
+  /** The sparkle in each open eye, as a share of the eye's width (0 for none). */
+  glint: 0.32,
+};
+
 export const EMOTION = {
   /** A shove startles it: wide eyes and an "o" mouth for this long. */
   surpriseSeconds: 0.9,

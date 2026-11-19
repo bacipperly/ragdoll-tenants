@@ -70,6 +70,9 @@ export class RagdollPhysics {
       for (const f of this.beforeStep) f();
       for (const r of this.ragdolls) { r.rememberPose(); r.fixedUpdate(FIXED_DT); }
       this.world.step();
+      // Tenants bumping into each other (cheap: a distance check per pair).
+      const rs = this.ragdolls;
+      for (let i = 0; i < rs.length; i++) for (let j = i + 1; j < rs.length; j++) ActiveRagdoll.checkBump(rs[i], rs[j]);
       this.accumulator -= FIXED_DT;
       steps++;
     }

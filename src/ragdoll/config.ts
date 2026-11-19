@@ -251,6 +251,10 @@ export const CLUMSY = {
   dropSure: 1.6, // a fall from this high stumbles nearly always (× clumsiness)
   landTrip: 0.6, // share of stumbles that trip it right over (the rest just stagger)
   tumbleSeconds: 1.1, // s it lies there after a slip or trip before getting up
+  bumpSafe: 1.0, // closing speed (u/s) of two tenants below which a bump is just a nudge
+  bumpSure: 4.5, // closing speed of a full-on bump (two tenants walking head-on: ~4.5)
+  bumpTrip: 0.3, // chance a full-on bump knocks it over (else it staggers), × clumsiness
+  bumpCooldown: 0.8, // s after a bump before it can be bumped into a stumble again
 };
 
 /** Moods: how it reacts to being shoved. */

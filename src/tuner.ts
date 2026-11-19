@@ -92,6 +92,10 @@ function buildEntries(): Record<string, Entry[]> {
       { path: 'CLUMSY.dropSure', label: 'sure-stumble fall height', min: 0.5, max: 4, step: 0.05 },
       { path: 'CLUMSY.landTrip', label: 'stumbles that trip over', min: 0, max: 1, step: 0.01 },
       { path: 'CLUMSY.tumbleSeconds', label: 'lie there (s)', min: 0.3, max: 4, step: 0.1 },
+      { path: 'CLUMSY.bumpSafe', label: 'bump: gentle below (u/s)', min: 0, max: 4, step: 0.05 },
+      { path: 'CLUMSY.bumpSure', label: 'bump: full-on at (u/s)', min: 1, max: 8, step: 0.05 },
+      { path: 'CLUMSY.bumpTrip', label: 'bump: chance to knock over', min: 0, max: 1, step: 0.01 },
+      { path: 'CLUMSY.bumpCooldown', label: 'bump: cooldown (s)', min: 0, max: 3, step: 0.05 },
     ],
     'Head': [
       { path: 'GOO.firmness', label: 'firmness', min: 5, max: 150, step: 1 },

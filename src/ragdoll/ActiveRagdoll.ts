@@ -324,6 +324,7 @@ export class ActiveRagdoll {
   /** Knocked down by a slip or trip (not by K or a throw): gets up by itself after this long. */
   private tumbleTimer = 0;
   private tumbling = false;
+  private bumpCooldown = 0;
   /** Phase of the breathing cycle (its rate changes with energy, so it's accumulated). */
   private breathPhase = 0;
   /** Eased 0..1 serious "game face", worn while jumping. */
@@ -775,6 +776,7 @@ export class ActiveRagdoll {
     this.teeter = this.edgeTime = this.edgeCooldown = 0;
     this.peakY = -Infinity;
     this.landPending = -1;
+    this.bumpCooldown = 0;
     this.wasStanding = true;
     this.edgeSupported.fill(true);
     this.muscle = 1;
@@ -889,6 +891,49 @@ export class ActiveRagdoll {
     this.trackHead(dt);
   }
 
+  /**
+   * Bumps between two tenants, checked after each physics step: if their heads or
+   * bellies touch while closing fast, each staggers, and may be knocked over, by how
+   * hard it was hit (the lighter one takes more of it) and how clumsy it is.
+   */
+  static checkBump(a: ActiveRagdoll, b: ActiveRagdoll): void {
+    if (a.carried || b.carried) return;
+    const ta = a.torso.body.translation(), tb = b.torso.body.translation();
+    let nx = tb.x - ta.x, ny = tb.y - ta.y, nz = tb.z - ta.z;
+    let d = Math.hypot(nx, ny, nz);
+    let touching = d < a.dims.bellyR + b.dims.bellyR + 0.03;
+    if (!touching) {
+      const ha = a.part('head'), hb = b.part('head');
+      const pa = ha.body.translation(), pb = hb.body.translation();
+      const hx = pb.x - pa.x, hy = pb.y - pa.y, hz = pb.z - pa.z, hd = Math.hypot(hx, hy, hz);
+      if (hd < ha.def.radius + hb.def.radius + 0.02) { touching = true; nx = hx; ny = hy; nz = hz; d = hd; }
+    }
+    if (!touching || d < 1e-6) return;
+    nx /= d; ny /= d; nz /= d;
+    const va = a.torso.body.linvel(), vb = b.torso.body.linvel();
+    const closing = (va.x - vb.x) * nx + (va.y - vb.y) * ny + (va.z - vb.z) * nz;
+    if (closing < CLUMSY.bumpSafe) return;
+    const ma = a.totalMass, mb = b.totalMass;
+    a.bumped(closing * (2 * mb / (ma + mb)), -nx, -nz);
+    b.bumped(closing * (2 * ma / (ma + mb)), nx, nz);
+  }
+
+  /** Hit this hard (u/s, already weighted by mass), from the side opposite (dx, dz). */
+  private bumped(hit: number, dx: number, dz: number): void {
+    if (this.knockedOut || this.bumpCooldown > 0) return;
+    const C = CLUMSY;
+    const s = THREE.MathUtils.smoothstep(hit, C.bumpSafe, C.bumpSure);
+    if (s <= 0) return;
+    this.bumpCooldown = C.bumpCooldown;
+    this.stagger = Math.max(this.stagger, STAGGER_SECONDS * (0.4 + 0.6 * s));
+    if (s > 0.3) this.surpriseTimer = Math.max(this.surpriseTimer, EMOTION.surpriseSeconds * s);
+    if (Math.random() < Math.min(0.95, s * C.bumpTrip * C.amount * this.traits.clumsy)) {
+      const h = Math.hypot(dx, dz) || 1;
+      const k = 0.4 + 0.4 * s;
+      this.tumble(this.tmpV.set((dx / h) * k, 0.3, (dz / h) * k));
+    }
+  }
+
   /** Slipped off an edge or tripped up, or lying there after one. */
   get isTumbling(): boolean { return this.tumbling; }
 
@@ -955,6 +1000,7 @@ export class ActiveRagdoll {
 
     // Edges: re-check one of the probes around the belly each step (all of them in 1/11 s).
     this.edgeCooldown = Math.max(0, this.edgeCooldown - dt);
+    this.bumpCooldown = Math.max(0, this.bumpCooldown - dt);
     let onEdge = false;
     if (standing) {
       const t = this.torso.body.translation();

@@ -41,3 +41,28 @@ const bench = run('jumping off a 0.3 platform', new THREE.Vector3(0, 0.3, 0.2), 
 report(bench, bench.up === TRIALS);
 const drop = run('dropped from 1.0 up', new THREE.Vector3(3, 1.0, 3), 2.5);
 report(drop, drop.tumble > 0 && drop.tumble < TRIALS && drop.up === TRIALS);
+
+// Bumps: two tenants meeting. Head-on at a walk sometimes knocks one over; one walking
+// into a standing one staggers it; strolling into each other is just a nudge.
+{
+  const b: any = phys.createRagdoll({ position: new THREE.Vector3(8, 0, 8) });
+  const bumpRun = (name: string, aSpeed: number, bSpeed: number, stroll: boolean, expect: (o: { stag: number; fell: number; up: number }) => boolean) => {
+    let stag = 0, fell = 0, up = 0;
+    for (let i = 0; i < TRIALS; i++) {
+      r.reset(new THREE.Vector3(0, 0, -3), 0); b.reset(new THREE.Vector3(0.05, 0, -1), Math.PI);
+      step(0.3);
+      r.setMoveInput(0, aSpeed, stroll); b.setMoveInput(0, -bSpeed, stroll);
+      let s = false, f = false;
+      step(2, () => { s ||= r.stagger > 0.25 || b.stagger > 0.25; f ||= r.isTumbling || b.isTumbling; });
+      r.setMoveInput(0, 0); b.setMoveInput(0, 0);
+      let u = false; step(5, () => { u ||= !r.isKnockedOut && !b.isKnockedOut && r.muscle > 0.9 && b.muscle > 0.9; });
+      stag += +s; fell += +f; up += +u;
+    }
+    const o = { stag, fell, up };
+    console.log(expect(o) ? 'OK  ' : 'FAIL', `${name.padEnd(28)} staggered ${stag}/${TRIALS}  fell ${fell}/${TRIALS}  back up ${up}/${TRIALS}`);
+  };
+  bumpRun('head-on at a walk', 1, 1, false, (o) => o.stag > TRIALS * 0.8 && o.fell > 0 && o.fell < TRIALS && o.up === TRIALS);
+  bumpRun('walking into one standing', 1, 0, false, (o) => o.stag > TRIALS * 0.5 && o.up === TRIALS);
+  bumpRun('strolling into each other', 0.35, 0.35, true, (o) => o.fell === 0 && o.up === TRIALS);
+  phys.removeRagdoll(b);
+}

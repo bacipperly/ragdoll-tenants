@@ -66,6 +66,7 @@ function buildEntries(): Record<string, Entry[]> {
       { path: 'PROPORTIONS.shoulderWidth', label: 'shoulder width', min: 0.5, max: 2, step: 0.01 },
       { path: 'PROPORTIONS.hipWidth', label: 'hip width', min: 0.5, max: 2, step: 0.01 },
       { path: 'PROPORTIONS.waist', label: 'waist pinch', min: 0, max: 0.6, step: 0.01 },
+      { path: 'PROPORTIONS.butt', label: 'butt', min: 0, max: 1.5, step: 0.01 },
     ],
     'Face': [
       { path: 'PROPORTIONS.eyeSize', label: 'eye size', min: 0.5, max: 1.8, step: 0.01 },

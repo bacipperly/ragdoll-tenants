@@ -75,6 +75,7 @@ export const PROPORTIONS = {
   shoulderWidth: 1, // broadens the upper body and sets the fins further apart
   hipWidth: 1, // widens the lower body and sets the legs further apart
   waist: 0, // 0 = the drawn teardrop; higher pinches in the middle
+  butt: 0.6, // 0 = smooth back; higher = two round cheeks low on the back of the belly
   // Face (scaled with the head).
   eyeSize: 1,
   eyeSpacing: 1,

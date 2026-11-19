@@ -31,6 +31,7 @@ function effectiveProportions(P: Proportions, T: Traits): Proportions {
     shoulderWidth: P.shoulderWidth * t.shoulderWidth,
     hipWidth: P.hipWidth * t.hipWidth,
     eyeSize: P.eyeSize * t.eyeSize,
+    butt: P.butt * t.butt,
     waist: Math.max(0, P.waist * t.waistKeep + t.waistAdd),
     eyeHeight: P.eyeHeight + t.eyeHeightAdd,
   };
@@ -94,6 +95,8 @@ export interface BodyDims {
   /** Total height, leg tips to top of head. */
   height: number;
   skin: { body: Profile; leg: Profile; arm: Profile };
+  /** How round the cheeks on the back of the belly are (0 = none). */
+  butt: number;
   /** Face features, in the drawn head's units (the face is scaled with the head). */
   face: FaceShape;
   /** Identifies this set of dimensions (for sharing skin geometry). */
@@ -143,6 +146,7 @@ export function bodyDims(base: Proportions = PROPORTIONS, traits: Traits = TRAIT
       leg: SKIN.leg.map(([h, r]) => [h * ll, r * lt] as const),
       arm: SKIN.arm.map(([h, r]) => [h * fl, r * fw] as const),
     },
+    butt: P.butt,
     face: {
       eyeSize: P.eyeSize, eyeSpacing: P.eyeSpacing, eyeHeight: P.eyeHeight,
       lashes: P.lashes, blush: P.blush, mouthWidth: P.mouthWidth,

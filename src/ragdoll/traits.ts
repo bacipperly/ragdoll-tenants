@@ -25,6 +25,7 @@ export interface TraitEffects {
     size: number;
     headSize: number; bodyWidth: number; bodyHeight: number; legLength: number; legThickness: number;
     finLength: number; finWidth: number; shoulderWidth: number; hipWidth: number; eyeSize: number;
+    butt: number;
     waistAdd: number; waistKeep: number; eyeHeightAdd: number;
   };
   /** All muscles: × speed and × damping. The neck gets its own (a baby's head bobbles). */
@@ -62,6 +63,7 @@ export function traitEffects(t: { age: number; weight: number; fitness: number }
       shoulderWidth: 1 + 0.1 * heavy + 0.3 * fit - 0.1 * unfit,
       hipWidth: 1 + 0.25 * heavy - 0.1 * slim + 0.1 * unfit,
       eyeSize: 1 + 0.3 * young - 0.12 * old,
+      butt: 1 + 0.4 * heavy + 0.25 * fit - 0.3 * slim - 0.2 * old,
       waistAdd: 0.15 * fit,
       waistKeep: 1 - heavy, // a heavy build loses the waist
       eyeHeightAdd: -0.08 * young, // eyes low on the face reads as babyish

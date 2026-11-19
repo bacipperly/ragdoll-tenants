@@ -34,7 +34,7 @@ export const RECIPE_LIMITS: Record<string, [number, number]> = {
   age: [0, 1], weight: [-1, 1], fitness: [-1, 1],
   headSize: [0.5, 1.8], headFloat: [0, 4], bodyWidth: [0.5, 1.8], bodyHeight: [0.5, 1.8],
   legLength: [0.4, 2.5], legThickness: [0.5, 1.8], finLength: [0.4, 1.8], finWidth: [0.4, 2.2],
-  shoulderWidth: [0.5, 2], hipWidth: [0.5, 2], waist: [0, 0.6],
+  shoulderWidth: [0.5, 2], hipWidth: [0.5, 2], waist: [0, 0.6], butt: [0, 1.5],
   eyeSize: [0.5, 1.8], eyeSpacing: [0.6, 1.5], eyeHeight: [-0.3, 0.3], lashes: [0, 1], blush: [0, 1], mouthWidth: [0.5, 2],
 };
 
@@ -120,6 +120,7 @@ export function randomRecipe(base: Recipe, rand: () => number = Math.random): Re
     finLength: near(P.finLength, 0.12), finWidth: near(P.finWidth, 0.15),
     shoulderWidth: near(P.shoulderWidth, 0.15), hipWidth: near(P.hipWidth, 0.15),
     waist: Math.max(0, P.waist + between(-0.05, 0.2) * (r() < 0.4 ? 1 : 0)),
+    butt: Math.max(0, P.butt + between(-0.25, 0.35)),
     eyeSize: near(P.eyeSize, 0.15), eyeSpacing: near(P.eyeSpacing, 0.08), eyeHeight: P.eyeHeight + between(-0.05, 0.05),
     lashes: r() < 0.3 ? between(0.4, 0.9) : 0,
     blush: r() < 0.35 ? between(0.3, 0.8) : 0,

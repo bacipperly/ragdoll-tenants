@@ -36,11 +36,13 @@ function lathe(
   profile: readonly (readonly [number, number])[],
   cx: number, cz: number, yOffset: number, squashZ: number,
   influence: (y: number) => Influence,
+  radial: number = SKIN.radialSegments,
+  /** Optional × on the radius at height y and angle a (a = 3π/2 points straight back). */
+  bulge?: (y: number, a: number) => number,
 ): THREE.BufferGeometry {
   // A smooth curve through the profile points, sampled evenly.
   const curve = new THREE.SplineCurve(profile.map(([h, r]) => new THREE.Vector2(h, r)));
   const rings = (profile.length - 1) * SKIN.samplesPerSegment + 1;
-  const radial = SKIN.radialSegments;
 
   const positions: number[] = [];
   const skinIndex: number[] = [];
@@ -55,7 +57,8 @@ function lathe(
     const inf = influence(y);
     for (let j = 0; j < radial; j++) {
       const a = (j / radial) * Math.PI * 2;
-      positions.push(cx + Math.cos(a) * r, y, cz + Math.sin(a) * r * squashZ);
+      const rr = bulge ? r * bulge(y, a) : r;
+      positions.push(cx + Math.cos(a) * rr, y, cz + Math.sin(a) * rr * squashZ);
       skinIndex.push(inf[0], inf[1], 0, 0);
       skinWeight.push(inf[2], inf[3], 0, 0);
     }
@@ -113,7 +116,19 @@ function buildSkin(bone: BoneIndex, B: BodyDims): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
 
   // Body: belly below the spine joint, chest above, blended across it so it bends softly.
-  parts.push(lathe(B.skin.body, 0, 0, 0, 1, (y) => blendAcross(belly, chest, y, B.spineY, 0.05)));
+  // A little butt: two round cheeks low on the back, just above where the legs come
+  // out, with a soft crease between them. The body gets extra segments round its
+  // middle (a multiple of 4, so one column runs straight down the back for the crease).
+  const h0 = B.skin.body[0][0], h1 = B.skin.body[B.skin.body.length - 1][0];
+  const buttY = h0 + 0.24 * (h1 - h0), buttH = 0.11 * (h1 - h0);
+  const back = Math.PI * 1.5;
+  const bulge = B.butt > 0 ? (y: number, a: number) => {
+    const da = Math.abs(a - back); // angle round from straight back (front is never near)
+    const cheeks = Math.exp(-(((da - 0.42) / 0.3) ** 2));
+    const height = Math.exp(-(((y - buttY) / buttH) ** 2));
+    return 1 + 0.45 * B.butt * cheeks * height;
+  } : undefined;
+  parts.push(lathe(B.skin.body, 0, 0, 0, 1, (y) => blendAcross(belly, chest, y, B.spineY, 0.05), 24, bulge));
 
   for (const [side, sx] of [['L', 1], ['R', -1]] as const) {
     const thigh = bone(`thigh${side}`);

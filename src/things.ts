@@ -187,8 +187,11 @@ export class Things {
 
 // ---------------------------------------------------------------- carrying
 
+/** A held thing weighs at most this share of its carrier (it's back to normal once let go). */
+const HELD_MASS_SHARE = 0.05;
+
 type Held =
-  | { kind: 'thing'; thing: Thing; joint: RAPIER.ImpulseJoint; groups: number }
+  | { kind: 'thing'; thing: Thing; joint: RAPIER.ImpulseJoint; groups: number; density: number }
   | { kind: 'tenant'; tenant: ActiveRagdoll; joint: RAPIER.ImpulseJoint };
 
 /** One tenant (the selected one) carrying one thing or tenant at a time. */
@@ -236,7 +239,8 @@ export class Carry {
     this.held = (best as { pick: () => Held }).pick();
     this.carrier = who;
     // Things are hugged in front; another tenant is hoisted overhead.
-    who.setHolding(true, (this.held as Held).kind === 'tenant' ? 'overhead' : 'front');
+    const held = this.held as Held;
+    who.setHolding(true, held.kind === 'tenant' ? 'overhead' : 'front', held.kind === 'thing' ? held.thing.body : null);
     return this.heldName;
   }
 
@@ -258,10 +262,22 @@ export class Carry {
     th.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     th.body.setGravityScale(0, true); // weightless while held
     const groups = th.collider.collisionGroups();
-    th.collider.setCollisionGroups(who.collisionGroups); // no bumping the carrier's head
+    // Held things touch nothing. Pressed against a crate stack or a wall, a held thing
+    // gets shoved up, and the grip lifts the carrier off its feet to flail in the air.
+    th.collider.setCollisionGroups(0);
+    // Light while held: a crate weighs more than a tenant, and at full weight it swings
+    // the carrier around through the joint whenever it jumps, bounces or turns.
+    const density = th.collider.density();
+    const maxHeld = HELD_MASS_SHARE * who.mass;
+    if (th.collider.mass() > maxHeld) th.collider.setDensity(density * maxHeld / th.collider.mass());
+    // Gripped rigidly, square to the chest: on a ball joint it tumbles freely and its
+    // corners knock about. It turns with the carrier.
+    const cr = who.chestBody.rotation();
+    th.body.setRotation(cr, true);
     const hp = who.holdPoint(th.size);
-    const joint = this.world.createImpulseJoint(RAPIER.JointData.spherical(hp, { x: 0, y: 0, z: 0 }), who.chestBody, th.body, true);
-    return { kind: 'thing', thing: th, joint, groups };
+    const still = { x: 0, y: 0, z: 0, w: 1 };
+    const joint = this.world.createImpulseJoint(RAPIER.JointData.fixed(hp, still, { x: 0, y: 0, z: 0 }, still), who.chestBody, th.body, true);
+    return { kind: 'thing', thing: th, joint, groups, density };
   }
 
   private attachTenant(who: ActiveRagdoll, r: ActiveRagdoll): Held {
@@ -288,6 +304,7 @@ export class Carry {
       const b = h.thing.body;
       b.setGravityScale(1, true);
       h.thing.collider.setCollisionGroups(h.groups);
+      h.thing.collider.setDensity(h.density);
       b.setLinvel(fling, true);
       b.setAngvel({ x: (Math.random() - 0.5) * 6, y: (Math.random() - 0.5) * 6, z: (Math.random() - 0.5) * 6 }, true);
     } else {

@@ -362,6 +362,7 @@ export class ActiveRagdoll {
   // ---- Carrying ----
   /** Holding something overhead (wanted, and eased 0..1 for the pose). */
   private holdWanted = false;
+  private heldBody: RAPIER.RigidBody | null = null;
   /** In front, hugged in the fins (things), or hoisted overhead (someone else). */
   private holdStyle: 'front' | 'overhead' = 'front';
   private hold = 0;
@@ -645,9 +646,22 @@ export class ActiveRagdoll {
    * Holding something overhead: fins up, a little lean back. The caller attaches the
    * held thing (see `holdPoint` and `chestBody`); this only does the pose.
    */
-  setHolding(on: boolean, style: 'front' | 'overhead' = 'front'): void {
+  /**
+   * @param body what it's holding, if it's a free body jointed to the chest: jumps and
+   *   bounces take it along at the same speed, so its inertia doesn't wrench the carrier.
+   */
+  setHolding(on: boolean, style: 'front' | 'overhead' = 'front', body: RAPIER.RigidBody | null = null): void {
     this.holdWanted = on;
+    this.heldBody = on ? body : null;
     if (on) this.holdStyle = style;
+  }
+
+  /** Gives the held body (if any) this upward speed, keeping its sideways speed. */
+  private liftHeld(upSpeed: number): void {
+    const b = this.heldBody;
+    if (!b || !b.isValid()) return;
+    const v = b.linvel();
+    b.setLinvel({ x: v.x, y: upSpeed, z: v.z }, true);
   }
   get isHolding(): boolean { return this.holdWanted; }
 
@@ -667,6 +681,8 @@ export class ActiveRagdoll {
     }
   }
   get isCarried(): boolean { return this.carried; }
+  /** The whole body's mass. */
+  get mass(): number { return this.totalMass; }
 
   /** The chest, for attaching something held overhead. */
   get chestBody(): RAPIER.RigidBody { return this.chest.body; }
@@ -700,6 +716,7 @@ export class ActiveRagdoll {
       const v = p.body.linvel();
       p.body.setLinvel({ x: v.x, y: upSpeed, z: v.z }, true);
     }
+    this.liftHeld(upSpeed);
     this.jumpPhase = 'air';
     this.airTime = 0;
     this.heightIntegral = 0;
@@ -739,6 +756,7 @@ export class ActiveRagdoll {
     this.gestures.stop();
     this.carried = false;
     this.holdWanted = false;
+    this.heldBody = null;
     this.hold = 0;
     this.faceAwake = 1;
     this.surpriseTimer = this.annoyance = this.angryTimer = this.surprise = this.anger = 0;
@@ -1134,6 +1152,7 @@ export class ActiveRagdoll {
         // everything comes along (the limbs trail a little through the joints).
         this.force.x = 0; this.force.y = (JUMP.velocity * this.traits.jump - this.vel.y) * this.totalMass; this.force.z = 0;
         this.torso.body.applyImpulse(this.force, true);
+        this.liftHeld(JUMP.velocity * this.traits.jump);
         this.jumpPhase = 'air';
         this.airTime = 0;
         this.heightIntegral = 0;

@@ -159,8 +159,9 @@ export class Things {
       for (const t of this.trampolines) {
         const onIt = Math.hypot(this.tmp.x - t.center.x, this.tmp.z - t.center.z) < t.radius * 0.85
           && Math.abs(r.debugState().groundY - t.top) < 0.03;
-        if (onIt && this.time - (this.lastBounce.get(r) ?? -9) > 0.4) {
-          r.launch(4.6);
+        // Only count bounces that happened: one refused in the air mustn't hold off the
+        // rebound when it lands.
+        if (onIt && this.time - (this.lastBounce.get(r) ?? -9) > 0.25 && r.launch(4.6)) {
           this.lastBounce.set(r, this.time);
         }
       }

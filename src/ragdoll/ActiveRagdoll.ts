@@ -683,14 +683,27 @@ export class ActiveRagdoll {
     return { x: 0, y: -0.02, z: d.chestR + 0.03 + extra };
   }
 
-  /** Bounced into the air (a trampoline): upward speed in units/s. Only when standing. */
-  launch(upSpeed: number): void {
-    if (this.knockedOut || this.carried || !this.grounded || this.jumpPhase !== 'ground') return;
-    this.force.x = 0; this.force.y = (upSpeed - this.vel.y) * this.totalMass; this.force.z = 0;
-    this.torso.body.applyImpulse(this.force, true);
+  /**
+   * Bounced into the air (a trampoline): upward speed in units/s. Works standing, or
+   * coming down from a bounce once it's back at standing height, so it rebounds the
+   * moment it lands instead of first squashing and settling. Returns whether it did.
+   */
+  launch(upSpeed: number): boolean {
+    if (this.knockedOut || this.carried || !this.grounded || this.jumpPhase === 'crouch') return false;
+    if (this.jumpPhase === 'air') {
+      const height = this.torso.body.translation().y - this.groundY;
+      if (this.vel.y > 0 || height > this.dims.hoverHeight + 0.02) return false;
+    }
+    // Every part leaves at the same upward speed, so the whole body goes up together
+    // instead of the belly yanking the limbs after it.
+    for (const p of this.parts.values()) {
+      const v = p.body.linvel();
+      p.body.setLinvel({ x: v.x, y: upSpeed, z: v.z }, true);
+    }
     this.jumpPhase = 'air';
     this.airTime = 0;
     this.heightIntegral = 0;
+    return true;
   }
 
   /** Is it angry right now (from too many shoves)? */

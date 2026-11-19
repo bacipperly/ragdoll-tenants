@@ -313,6 +313,15 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
+// Fade the loading screen out once the first frame is on screen.
+requestAnimationFrame(() => requestAnimationFrame(() => {
+  const loading = document.getElementById('loading');
+  if (!loading) return;
+  loading.classList.add('done');
+  loading.addEventListener('transitionend', () => loading.remove(), { once: true });
+  setTimeout(() => loading.remove(), 1000);
+}));
+
 // Slider panel: the feel (saved to tuning.json) and the selected tenant's look (saved
 // as a character recipe in characters.json).
 const gui = createTuner({

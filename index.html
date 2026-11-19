@@ -13,10 +13,80 @@
         pointer-events: none; white-space: pre; font-variant-numeric: tabular-nums;
       }
       #hud b { color: #ffd166; }
+      /* Loading screen: plain HTML/CSS so it shows before the script (and Rapier's wasm) arrives. */
+      #loading {
+        position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 18px;
+        background: radial-gradient(circle at 50% 40%, #e3eaed, #b9c6cc); color: #37474f;
+        transition: opacity 0.5s ease;
+      }
+      #loading.done { opacity: 0; pointer-events: none; }
+      #loading .stage { position: relative; width: 120px; height: 110px; }
+      #loading .blob {
+        position: absolute; left: 30px; bottom: 14px; width: 60px; height: 64px;
+        border-radius: 50% 50% 46% 46% / 58% 58% 42% 42%; background: #ffb4a2;
+        box-shadow: inset -8px -8px 0 rgba(0, 0, 0, 0.07);
+        transform-origin: 50% 100%; animation: hop 0.9s cubic-bezier(0.3, 0, 0.6, 1) infinite;
+      }
+      #loading .blob::before, #loading .blob::after {
+        content: ''; position: absolute; top: 24px; width: 7px; height: 10px;
+        border-radius: 50%; background: #263238; animation: blink 3.2s infinite;
+      }
+      #loading .blob::before { left: 17px; }
+      #loading .blob::after { right: 17px; }
+      #loading .shadow {
+        position: absolute; left: 34px; bottom: 6px; width: 52px; height: 10px; border-radius: 50%;
+        background: rgba(38, 50, 56, 0.18); animation: shadow 0.9s cubic-bezier(0.3, 0, 0.6, 1) infinite;
+      }
+      #loading h1 { margin: 0; font-size: 26px; letter-spacing: 0.02em; }
+      #loading p { margin: 0; font-size: 14px; opacity: 0.75; }
+      #loading .bar { width: 160px; height: 4px; border-radius: 2px; background: rgba(38, 50, 56, 0.12); overflow: hidden; }
+      #loading .bar::after {
+        content: ''; display: block; width: 40%; height: 100%; border-radius: 2px; background: #546e7a;
+        animation: slide 1.2s ease-in-out infinite;
+      }
+      #loading.failed .bar, #loading.failed .blob, #loading.failed .shadow { animation-play-state: paused; }
+      #loading.failed p { color: #c62828; opacity: 1; max-width: 80vw; text-align: center; }
+      @keyframes hop {
+        0%, 100% { transform: translateY(0) scale(1.12, 0.86); }
+        15% { transform: translateY(-4px) scale(0.92, 1.1); }
+        50% { transform: translateY(-38px) scale(0.98, 1.03); }
+        85% { transform: translateY(-2px) scale(0.95, 1.06); }
+      }
+      @keyframes shadow {
+        0%, 100% { transform: scale(1.05); opacity: 1; }
+        50% { transform: scale(0.6); opacity: 0.5; }
+      }
+      @keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+      @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+      @media (prefers-reduced-motion: reduce) {
+        #loading .blob, #loading .shadow, #loading .bar::after { animation: none; }
+      }
     </style>
   </head>
   <body>
     <div id="hud"></div>
+    <div id="loading" role="status" aria-live="polite">
+      <div class="stage"><div class="shadow"></div><div class="blob"></div></div>
+      <h1>Tiny Tenants</h1>
+      <p id="loading-msg">Waking up the tenants…</p>
+      <div class="bar"></div>
+    </div>
+    <script>
+      // If startup fails, say so on the loading screen instead of hanging on it.
+      (function () {
+        function fail(e) {
+          var el = document.getElementById('loading');
+          if (!el || el.classList.contains('done')) return;
+          el.classList.add('failed');
+          var why = e && (e.reason || e.error || e.message);
+          document.getElementById('loading-msg').textContent =
+            'Something went wrong while loading' + (why ? ': ' + (why.message || why) : '.');
+        }
+        window.addEventListener('error', fail);
+        window.addEventListener('unhandledrejection', fail);
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

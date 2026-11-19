@@ -235,6 +235,24 @@ export const KNOCKOUT = {
   recoverSeconds: 1.4, // muscles ramp back over this long, so getting up is wobbly
 } as const;
 
+/**
+ * Clumsiness: physics with consequences. At a ledge it teeters, windmilling, and then
+ * either catches itself or slips off; a hard landing sometimes trips it over. Each
+ * chance is per occasion, and × `amount` × the tenant's own clumsiness (from its traits:
+ * babies, seniors, the heavy and the out of shape are clumsier, the athletic less so).
+ */
+export const CLUMSY = {
+  amount: 1, // × every chance: 0 = never clumsy, 2 = twice as often
+  teeterSeconds: 0.55, // how long it wobbles at an edge before it slips or catches itself
+  teeterLean: 0.4, // rad it tips toward the drop while teetering
+  edgeSlip: 0.35, // chance a teeter ends in a slip (more when moving toward the drop)
+  edgeCooldown: 1.8, // s after catching itself before it can teeter again
+  dropSafe: 0.55, // a fall from this high (units) never stumbles; a jump on the flat rises ~0.48
+  dropSure: 1.6, // a fall from this high stumbles nearly always (× clumsiness)
+  landTrip: 0.6, // share of stumbles that trip it right over (the rest just stagger)
+  tumbleSeconds: 1.1, // s it lies there after a slip or trip before getting up
+};
+
 /** Moods: how it reacts to being shoved. */
 export const EMOTION = {
   /** A shove startles it: wide eyes and an "o" mouth for this long. */

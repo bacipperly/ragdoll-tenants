@@ -82,6 +82,17 @@ function buildEntries(): Record<string, Entry[]> {
       { path: 'BUTT.travel', label: 'max wobble', min: 0, max: 0.8, step: 0.01 },
       { path: 'BUTT.walkBounce', label: 'walk bounce', min: 0, max: 0.8, step: 0.01 },
     ],
+    'Clumsiness': [
+      { path: 'CLUMSY.amount', label: 'how clumsy (× all chances)', min: 0, max: 3, step: 0.05 },
+      { path: 'CLUMSY.teeterSeconds', label: 'teeter time (s)', min: 0.15, max: 1.5, step: 0.05 },
+      { path: 'CLUMSY.teeterLean', label: 'teeter lean (rad)', min: 0, max: 0.9, step: 0.01 },
+      { path: 'CLUMSY.edgeSlip', label: 'slip off edges', min: 0, max: 1, step: 0.01 },
+      { path: 'CLUMSY.edgeCooldown', label: 'after catching itself (s)', min: 0.3, max: 5, step: 0.1 },
+      { path: 'CLUMSY.dropSafe', label: 'safe fall height', min: 0.2, max: 2, step: 0.05 },
+      { path: 'CLUMSY.dropSure', label: 'sure-stumble fall height', min: 0.5, max: 4, step: 0.05 },
+      { path: 'CLUMSY.landTrip', label: 'stumbles that trip over', min: 0, max: 1, step: 0.01 },
+      { path: 'CLUMSY.tumbleSeconds', label: 'lie there (s)', min: 0.3, max: 4, step: 0.1 },
+    ],
     'Head': [
       { path: 'GOO.firmness', label: 'firmness', min: 5, max: 150, step: 1 },
       { path: 'GOO.viscosity', label: 'thickness (ooze)', min: 0.5, max: 30, step: 0.5 },

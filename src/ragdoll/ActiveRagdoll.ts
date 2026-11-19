@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { BODY, BUTT, EMOTION, GAIT, GRAVITY_COMP, HOVER, JUMP, KNOCKOUT, LIMITS, MOVE, MUSCLES, UPRIGHT } from './config';
+import { BODY, BUTT, CLUMSY, EMOTION, GAIT, GRAVITY_COMP, HOVER, JUMP, KNOCKOUT, LIMITS, MOVE, MUSCLES, UPRIGHT } from './config';
 import { GooHead, type GooContact } from './goo';
 import { Face, acquireSkin, releaseSkin } from './skin';
 import { bodyDims, type BodyDims } from './proportions';
@@ -200,6 +200,8 @@ interface Joint {
 }
 
 const STAGGER_SECONDS = 0.7;
+/** Ground checks around the belly, for edges. */
+const EDGE_PROBES = 8, PROBES_PER_STEP = 1;
 /** How long an idle blink holds the eyes shut. */
 const BLINK_SECONDS = 0.09;
 /** How far (radians, per axis) the neck may turn to keep the head level. */
@@ -300,7 +302,28 @@ export class ActiveRagdoll {
     }
   };
   /** Reaction strengths handed to the blender each step (reused, not reallocated). */
-  private readonly reactions = { angry: 0, surprised: 0, focused: 0 };
+  private readonly reactions = { angry: 0, surprised: 0, focused: 0, teetering: 0 };
+
+  // Clumsiness (see CLUMSY): edge probes around the belly, teetering, slips and trips.
+  /** Which of the EDGE_PROBES directions have ground under them (one is re-checked each step). */
+  private readonly edgeSupported = new Array<boolean>(EDGE_PROBES).fill(true);
+  private edgeProbe = 0;
+  /** Seconds spent at an edge; at CLUMSY.teeterSeconds it slips or catches itself. */
+  private edgeTime = 0;
+  private edgeCooldown = 0;
+  /** Unit direction toward the drop (horizontal), and how much of its footing is gone. */
+  private readonly edgeDir = new THREE.Vector3();
+  private edgeShare = 0;
+  /** Eased 0..1: how hard it's teetering (pose, lean and face). */
+  private teeter = 0;
+  /** Was it standing last step, the highest its belly got while not, and a landing waiting to be judged. */
+  private wasStanding = true;
+  private peakY = -Infinity;
+  private landPending = -1;
+  private landImpact = 0;
+  /** Knocked down by a slip or trip (not by K or a throw): gets up by itself after this long. */
+  private tumbleTimer = 0;
+  private tumbling = false;
   /** Phase of the breathing cycle (its rate changes with energy, so it's accumulated). */
   private breathPhase = 0;
   /** Eased 0..1 serious "game face", worn while jumping. */
@@ -384,6 +407,8 @@ export class ActiveRagdoll {
   private readonly qHead = new THREE.Quaternion();
   private readonly tmpV = new THREE.Vector3();
   private readonly tmpQ = new THREE.Quaternion();
+  private readonly qTip = new THREE.Quaternion();
+  private readonly tmpAxis = new THREE.Vector3();
   // The butt's jiggle: a spring bone that follows the belly (see syncMeshes).
   private readonly buttBone = new THREE.Bone();
   private readonly buttRest = new THREE.Vector3();
@@ -578,6 +603,7 @@ export class ActiveRagdoll {
 
   /** Knock out (all joint spring stiffness → 0, balance off) or start getting back up. */
   setKnockedOut(out: boolean): void {
+    if (!out) this.tumbling = false;
     if (out === this.knockedOut) return;
     this.knockedOut = out;
     if (out) {
@@ -745,6 +771,12 @@ export class ActiveRagdoll {
     }
     this.buttSettled = false;
     this.knockedOut = false;
+    this.tumbling = false;
+    this.teeter = this.edgeTime = this.edgeCooldown = 0;
+    this.peakY = -Infinity;
+    this.landPending = -1;
+    this.wasStanding = true;
+    this.edgeSupported.fill(true);
     this.muscle = 1;
     this.heightIntegral = 0;
     this.gaitWeight = 0;
@@ -850,10 +882,129 @@ export class ActiveRagdoll {
       this.applyUpright(wantX, wantZ, speed, strength * (0.4 + 0.6 * steady));
     }
 
+    this.updateClumsy(dt);
     this.poseLimbs();
     this.applyMotors();
     this.updateFace(dt);
     this.trackHead(dt);
+  }
+
+  /** Slipped off an edge or tripped up, or lying there after one. */
+  get isTumbling(): boolean { return this.tumbling; }
+
+  /**
+   * Knocked over by its own clumsiness: goes limp with a nudge `dv` (units/s, whole
+   * body), and gets up by itself once it's lain there a moment.
+   */
+  tumble(dv: THREE.Vector3): void {
+    if (this.knockedOut || this.carried) return;
+    this.setKnockedOut(true);
+    const m = this.totalMass;
+    this.force.x = dv.x * m; this.force.y = dv.y * m; this.force.z = dv.z * m;
+    this.torso.body.applyImpulse(this.force, true);
+    this.tumbling = true;
+    this.tumbleTimer = CLUMSY.tumbleSeconds;
+    this.surpriseTimer = EMOTION.surpriseSeconds;
+    this.teeter = 0;
+    this.edgeTime = 0;
+  }
+
+  /**
+   * Clumsiness, once per step: feel for edges around the belly and teeter on them
+   * (slipping off, or catching itself and stepping back), judge landings (a hard one
+   * may trip it or make it stagger), and get up after a tumble.
+   */
+  private updateClumsy(dt: number): void {
+    const C = CLUMSY, chance = C.amount * this.traits.clumsy;
+    const vel = this.vel;
+    if (this.tumbling) {
+      this.tumbleTimer -= dt;
+      if (this.tumbleTimer <= 0 && Math.hypot(vel.x, vel.y, vel.z) < 0.6) this.setKnockedOut(false);
+    }
+    const standing = this.grounded && this.jumpPhase === 'ground' && !this.knockedOut && !this.carried && this.muscle > 0.9;
+
+    // Landings. Judged a moment after touching down, so a trampoline's rebound (which
+    // leaves again at once) never counts.
+    const y = this.torso.body.translation().y;
+    if (!standing && !this.knockedOut) this.peakY = Math.max(this.peakY, y);
+    if (standing && !this.wasStanding) {
+      // How far it fell: from its highest to standing on what it landed on.
+      this.landImpact = this.peakY - (this.groundY + this.dims.hoverHeight);
+      this.landPending = this.landImpact > C.dropSafe ? 0.08 : -1;
+      this.peakY = -Infinity;
+    }
+    if (this.knockedOut) this.peakY = -Infinity;
+    this.wasStanding = standing;
+    if (this.landPending >= 0) {
+      if (!standing) this.landPending = -1;
+      else if ((this.landPending -= dt) < 0) {
+        const hard = THREE.MathUtils.smoothstep(this.landImpact, C.dropSafe, C.dropSure);
+        if (Math.random() < Math.min(0.95, hard * chance)) {
+          // Stumbled: tripped right over (pitching the way it was going), or a stagger.
+          const sp = Math.hypot(vel.x, vel.z);
+          if (Math.random() < C.landTrip) {
+            const fx = sp > 0.2 ? vel.x / sp : Math.sin(this.facing), fz = sp > 0.2 ? vel.z / sp : Math.cos(this.facing);
+            this.tumble(this.tmpV.set(fx * (0.6 + 0.3 * sp), 0.4, fz * (0.6 + 0.3 * sp)));
+          } else {
+            this.stagger = STAGGER_SECONDS;
+            this.squash = 1;
+          }
+        }
+      }
+    }
+
+    // Edges: re-check one of the probes around the belly each step (all of them in 1/11 s).
+    this.edgeCooldown = Math.max(0, this.edgeCooldown - dt);
+    let onEdge = false;
+    if (standing) {
+      const t = this.torso.body.translation();
+      const r = this.dims.bellyR * 1.3;
+      for (let k = 0; k < PROBES_PER_STEP; k++) {
+        const i = this.edgeProbe = (this.edgeProbe + 1) % EDGE_PROBES;
+        const a = (i / EDGE_PROBES) * Math.PI * 2;
+        this.ray.origin.x = t.x + Math.sin(a) * r; this.ray.origin.y = this.groundY + 0.08; this.ray.origin.z = t.z + Math.cos(a) * r;
+        const hit = this.world.castRay(this.ray, 0.2, true, undefined, RAY_GROUPS);
+        this.edgeSupported[i] = hit !== null && hit.timeOfImpact < 0.13;
+      }
+      let dx = 0, dz = 0, gone = 0;
+      for (let i = 0; i < EDGE_PROBES; i++) {
+        if (this.edgeSupported[i]) continue;
+        const a = (i / EDGE_PROBES) * Math.PI * 2;
+        dx += Math.sin(a); dz += Math.cos(a); gone++;
+      }
+      const len = Math.hypot(dx, dz);
+      if (gone > 0 && len > 1e-3) {
+        onEdge = true;
+        this.edgeDir.set(dx / len, 0, dz / len);
+        this.edgeShare = gone / EDGE_PROBES;
+      }
+    } else {
+      this.edgeSupported.fill(true);
+    }
+
+    if (onEdge && this.edgeCooldown === 0) {
+      this.edgeTime += dt;
+      if (this.edgeTime >= C.teeterSeconds) {
+        // Decide: moving toward the drop, or with more of its footing gone, it's likelier to go.
+        const toward = Math.max(0, vel.x * this.edgeDir.x + vel.z * this.edgeDir.z);
+        const p = C.edgeSlip * chance * (0.5 + 2 * this.edgeShare + toward);
+        if (Math.random() < Math.min(0.95, p)) {
+          this.tumble(this.tmpV.copy(this.edgeDir).multiplyScalar(0.9).setY(0.3));
+        } else {
+          // Caught itself: a hop back from the edge, still wobbly.
+          const k = -0.7 * this.totalMass;
+          this.force.x = this.edgeDir.x * k; this.force.y = 0; this.force.z = this.edgeDir.z * k;
+          this.torso.body.applyImpulse(this.force, true);
+          this.stagger = Math.max(this.stagger, 0.4 * STAGGER_SECONDS);
+          this.edgeCooldown = C.edgeCooldown;
+        }
+        this.edgeTime = 0;
+      }
+    } else {
+      this.edgeTime = Math.max(0, this.edgeTime - 2 * dt);
+    }
+    const want = standing && onEdge && this.edgeCooldown === 0 ? Math.min(1, 0.3 + this.edgeTime / C.teeterSeconds) : 0;
+    this.teeter += (want - this.teeter) * Math.min(1, dt * (want > this.teeter ? 12 : 5));
   }
 
   /**
@@ -929,6 +1080,7 @@ export class ActiveRagdoll {
     this.reactions.angry = this.anger;
     this.reactions.surprised = this.surprise;
     this.reactions.focused = this.focus;
+    this.reactions.teetering = this.teeter;
     this.moods.update(dt, this.reactions);
     // Fidgeting also makes the eyes dart about.
     const L = this.moods.letters;
@@ -1260,6 +1412,12 @@ export class ActiveRagdoll {
     const X = this.gestures.extras;
 
     this.qTarget.setFromAxisAngle(this.axisY, this.facing + twist + X.yaw);
+    // Teetering: the top tips out over the drop (a world-space tilt about up × dir).
+    if (this.teeter > 0.01) {
+      const d = this.edgeDir;
+      this.qTip.setFromAxisAngle(this.tmpAxis.set(d.z, 0, -d.x), CLUMSY.teeterLean * this.teeter);
+      this.qTarget.premultiply(this.qTip);
+    }
     // Positive rotation about local +x tips the top toward local +z (forward).
     this.qLean.setFromAxisAngle(this.axisX, lean + X.bow);
     this.qTarget.multiply(this.qLean);

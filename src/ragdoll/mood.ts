@@ -127,6 +127,11 @@ export const REACTIONS = {
     spine: 0.4, finsLift: 0.35, finsSpread: 0.4, energy: 0.3,
     smile: 0, mouthOpen: 1, eyeOpen: 1, browShow: 1, browHeight: 1, browAngle: -0.4,
   },
+  /** On the edge of a drop: windmilling fins, wide eyes, mouth open. */
+  teetering: {
+    finsLift: 0.9, finsSpread: 1, finsBack: -0.3, tremble: 0.7, tension: 0.5,
+    smile: -0.2, mouthOpen: 0.7, eyeOpen: 1, browShow: 1, browHeight: 1, browAngle: -0.6,
+  },
   /**
    * The game face, while jumping: concentrating hard. Lopsided squint, knitted brows, the
    * mouth scrunched off to one side with the tongue poking out of the corner.

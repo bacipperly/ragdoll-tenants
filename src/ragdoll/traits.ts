@@ -35,6 +35,8 @@ export interface TraitEffects {
   cadence: number; stride: number; bob: number; waddle: number; speed: number;
   /** × jump power, × time to get back up after a knockout, × head squish. */
   jump: number; recover: number; squish: number;
+  /** × the chance of teetering into a slip or tripping on a landing (see CLUMSY). */
+  clumsy: number;
   /** Resting posture, as letters (see mood.ts): moods are layered on top of this. */
   posture: Word;
 }
@@ -85,6 +87,7 @@ export function traitEffects(t: { age: number; weight: number; fitness: number }
     jump: Math.max(0.3, 1 - 0.15 * young - 0.45 * old - 0.25 * heavy + 0.2 * fit - 0.15 * unfit),
     recover: 1 + 0.8 * old + 0.4 * heavy - 0.3 * fit + 0.2 * unfit,
     squish: 1 + 0.5 * young + 0.4 * heavy,
+    clumsy: Math.max(0.2, 1 + 0.7 * young + 0.5 * old + 0.3 * heavy + 0.4 * unfit - 0.5 * fit),
     posture: {
       // Baby: loose, wobbly, a bit bouncy, fins out for balance, looking up.
       // Senior: stooped, leaning in, slow, short steps, a slight tremble.

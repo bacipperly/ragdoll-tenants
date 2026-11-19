@@ -82,6 +82,11 @@ function buildEntries(): Record<string, Entry[]> {
       { path: 'BUTT.travel', label: 'max wobble', min: 0, max: 0.8, step: 0.01 },
       { path: 'BUTT.walkBounce', label: 'walk bounce', min: 0, max: 0.8, step: 0.01 },
     ],
+    'Carrying': [
+      { path: 'CARRY.loadFeel', label: 'feels the weight (sag)', min: 0, max: 1, step: 0.01 },
+      { path: 'CARRY.wobble', label: 'rocks under it (rad)', min: 0, max: 0.4, step: 0.005 },
+      { path: 'CARRY.slowdown', label: 'slowed by the load', min: 0, max: 0.8, step: 0.01 },
+    ],
     'Clumsiness': [
       { path: 'CLUMSY.amount', label: 'how clumsy (× all chances)', min: 0, max: 3, step: 0.05 },
       { path: 'CLUMSY.teeterSeconds', label: 'teeter time (s)', min: 0.15, max: 1.5, step: 0.05 },

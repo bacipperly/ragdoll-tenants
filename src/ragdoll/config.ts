@@ -257,6 +257,19 @@ export const CLUMSY = {
   bumpCooldown: 0.8, // s after a bump before it can be bumped into a stumble again
 };
 
+/** Carrying another tenant overhead. */
+export const CARRY = {
+  /** Share of the held tenant's weight pressing down on the carrier's chest: it sags under it. */
+  loadFeel: 0.4,
+  /**
+   * The load teeters about overhead: the carrier rocks under it, a slowly wandering lean
+   * (rad) for a load as heavy as itself. More while walking.
+   */
+  wobble: 0.1,
+  /** Walking speed lost per held-mass-per-own-mass (a load as heavy as itself: −this share). */
+  slowdown: 0.35,
+};
+
 /** Moods: how it reacts to being shoved. */
 export const EMOTION = {
   /** A shove startles it: wide eyes and an "o" mouth for this long. */

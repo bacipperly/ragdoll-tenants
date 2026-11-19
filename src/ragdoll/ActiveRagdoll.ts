@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { BODY, BUTT, CLUMSY, EMOTION, GAIT, GRAVITY_COMP, HOVER, JUMP, KNOCKOUT, LIMITS, MOVE, MUSCLES, UPRIGHT } from './config';
+import { BODY, BUTT, CARRY, CLUMSY, EMOTION, GAIT, GRAVITY_COMP, HOVER, JUMP, KNOCKOUT, LIMITS, MOVE, MUSCLES, UPRIGHT } from './config';
 import { GooHead, type GooContact } from './goo';
 import { Face, acquireSkin, releaseSkin } from './skin';
 import { bodyDims, type BodyDims } from './proportions';
@@ -328,6 +328,13 @@ export class ActiveRagdoll {
   /** Who's carrying it overhead, if anyone (see setCarried). */
   private carrier: ActiveRagdoll | null = null;
   private carryExtra = 0;
+  /**
+   * The load it feels from a tenant it's carrying (set by that tenant each step):
+   * a force on its chest at the hold point, and how heavy the load is (eased, for speed).
+   */
+  private loadFresh = false;
+  private loadWeight = 0;
+  private loadMass = 0;
   /** Phase of the breathing cycle (its rate changes with energy, so it's accumulated). */
   private breathPhase = 0;
   /** Eased 0..1 serious "game face", worn while jumping. */
@@ -856,6 +863,14 @@ export class ActiveRagdoll {
     // belly is ever given a torque, so only it needs its torques cleared.
     for (const p of this.parts.values()) p.body.resetForces(true);
     torso.resetTorques(true);
+    // A tenant held overhead weighs on the chest (set by it last step; see followCarrier).
+    if (this.loadFresh) {
+      this.force.x = 0; this.force.y = -this.loadWeight; this.force.z = 0;
+      this.chest.body.addForce(this.force, true);
+      this.loadFresh = false;
+    } else {
+      this.loadMass = 0;
+    }
     torso.linvel(this.vel as RAPIER.Vector);
 
     this.updateMood(dt);
@@ -863,7 +878,8 @@ export class ActiveRagdoll {
 
     const speed = Math.hypot(this.vel.x, this.vel.z);
     // Energy changes how fast it chooses to walk: a tired shuffle, an excited scurry.
-    const maxSpeed = (this.strolling ? MOVE.strollSpeed : MOVE.walkSpeed) * (1 + 0.25 * P.energy) * this.traits.speed;
+    const maxSpeed = (this.strolling ? MOVE.strollSpeed : MOVE.walkSpeed) * (1 + 0.25 * P.energy) * this.traits.speed
+      * Math.max(0.3, 1 - CARRY.slowdown * this.loadMass / this.totalMass);
     const wantX = this.knockedOut || this.carried ? 0 : this.moveInput.x * maxSpeed;
     const wantZ = this.knockedOut || this.carried ? 0 : this.moveInput.y * maxSpeed;
 
@@ -968,6 +984,13 @@ export class ActiveRagdoll {
     this.force.y = m * (k * (ct.y + this.tmpAxis.y - t.y) + damp * (vy - v.y));
     this.force.z = m * (k * (ct.z + this.tmpAxis.z - t.z) + damp * (vz - v.z));
     this.torso.body.addForce(this.force, true);
+    // The carrier feels part of the weight, pressing on its chest (not from up at the hold
+    // point: from there it tips the carrier over like an upside-down pendulum; and not
+    // the spring's pull, which fed back runs away into a violent shake). It also rocks
+    // under the load: see applyUpright.
+    c.loadWeight = CARRY.loadFeel * m * 9.81;
+    c.loadFresh = true;
+    c.loadMass = m;
   }
 
   /** Slipped off an edge or tripped up, or lying there after one. */
@@ -1494,6 +1517,16 @@ export class ActiveRagdoll {
     const X = this.gestures.extras;
 
     this.qTarget.setFromAxisAngle(this.axisY, this.facing + twist + X.yaw);
+    // Carrying a tenant: it rocks under the load, a slow wandering lean, more while walking.
+    if (this.loadMass > 0) {
+      const amp = CARRY.wobble * Math.min(1.5, this.loadMass / this.totalMass) * (0.8 + 0.4 * this.gaitWeight);
+      const tt = this.time;
+      this.qTip.setFromAxisAngle(this.tmpAxis.set(
+        0.7 * Math.sin(1.9 * tt) + 0.3 * Math.sin(4.3 * tt + 1), 0,
+        0.7 * Math.sin(1.4 * tt + 2) + 0.3 * Math.sin(3.7 * tt),
+      ).normalize(), amp * Math.min(1, this.tmpAxis.length()));
+      this.qTarget.premultiply(this.qTip);
+    }
     // Teetering: the top tips out over the drop (a world-space tilt about up × dir).
     if (this.teeter > 0.01) {
       const d = this.edgeDir;

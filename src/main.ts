@@ -112,6 +112,7 @@ scene.add(ragdoll.group);
 
 // Things to play with, and picking things (and tenants) up.
 const things = new Things(world, scene);
+physics.beforeStep.push(() => things.rememberPose());
 const carry = new Carry(world);
 
 // Everyone on screen; `ragdoll` is always the selected one (WASD, camera, look sliders).
@@ -262,7 +263,7 @@ function frame(now: number) {
   const t0 = performance.now();
   physics.step(dt);
   const physicsMs = performance.now() - t0;
-  things.update(Math.min(dt, 0.1), crowd.tenants);
+  things.update(Math.min(dt, 0.1), crowd.tenants, physics.alpha);
   carry.update(Math.min(dt, 0.1), crowd.tenants);
   physicsMsAvg += (physicsMs - physicsMsAvg) * 0.05;
   frameMsAvg += (dt * 1000 - frameMsAvg) * 0.05;

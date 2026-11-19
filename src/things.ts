@@ -24,6 +24,9 @@ export interface Thing {
   size: number;
   /** Where it starts, for "reset things". */
   home: THREE.Vector3;
+  /** Its pose before the latest physics step (see rememberPose). */
+  prevPos: THREE.Vector3;
+  prevRot: THREE.Quaternion;
 }
 
 interface Trampoline { center: THREE.Vector3; radius: number; top: number }
@@ -35,6 +38,7 @@ export class Things {
   private readonly lastBounce = new Map<ActiveRagdoll, number>();
   private time = 0;
   private readonly tmp = new THREE.Vector3();
+  private readonly tmpQ = new THREE.Quaternion();
 
   constructor(private readonly world: RAPIER.World, private readonly scene: THREE.Scene) {
     this.addBall(new THREE.Vector3(1.1, 0.4, 1.3));
@@ -126,13 +130,28 @@ export class Things {
     const collider = this.world.createCollider(colliderDesc, body);
     mesh.traverse((o) => { o.castShadow = o.receiveShadow = true; });
     this.scene.add(mesh);
-    this.list.push({ name, body, collider, mesh, size, home: at.clone() });
+    this.list.push({ name, body, collider, mesh, size, home: at.clone(), prevPos: at.clone(), prevRot: new THREE.Quaternion() });
   }
 
   // ---- per frame ----
 
-  /** Bounces tenants standing on a trampoline, and moves the meshes to their bodies. */
-  update(dt: number, tenants: readonly ActiveRagdoll[]): void {
+  /**
+   * Call before each physics step (RagdollPhysics.beforeStep): keeps every thing's pose,
+   * so update() can draw it between the last two steps instead of stuttering.
+   */
+  rememberPose(): void {
+    for (const th of this.list) {
+      const p = th.body.translation(), q = th.body.rotation();
+      th.prevPos.set(p.x, p.y, p.z);
+      th.prevRot.set(q.x, q.y, q.z, q.w);
+    }
+  }
+
+  /**
+   * Bounces tenants standing on a trampoline, and moves the meshes to their bodies.
+   * `alpha` is RagdollPhysics.alpha; 1 draws the latest step as it is.
+   */
+  update(dt: number, tenants: readonly ActiveRagdoll[], alpha = 1): void {
     this.time += dt;
     for (const r of tenants) {
       if (r.isKnockedOut || r.isCarried) continue;
@@ -148,8 +167,8 @@ export class Things {
     }
     for (const th of this.list) {
       const p = th.body.translation(), q = th.body.rotation();
-      th.mesh.position.set(p.x, p.y, p.z);
-      th.mesh.quaternion.set(q.x, q.y, q.z, q.w);
+      th.mesh.position.set(p.x, p.y, p.z).sub(th.prevPos).multiplyScalar(alpha).add(th.prevPos);
+      th.mesh.quaternion.slerpQuaternions(th.prevRot, this.tmpQ.set(q.x, q.y, q.z, q.w), alpha);
     }
   }
 
@@ -161,6 +180,7 @@ export class Things {
       th.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       th.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
+    this.rememberPose(); // a teleport: don't draw them sliding back
   }
 }
 
@@ -232,6 +252,7 @@ export class Carry {
     const at = this.holdWorld(who, th.size, new THREE.Vector3());
     // Lift it straight to the spot first, so the joint doesn't yank anyone across the room.
     th.body.setTranslation(at, true);
+    th.prevPos.copy(at); // a teleport: don't draw it sliding up
     th.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     th.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     th.body.setGravityScale(0, true); // weightless while held

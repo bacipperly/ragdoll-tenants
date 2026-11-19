@@ -25,3 +25,25 @@ for (const hz of [60, 144]) {
   const u = uneven(drawn);
   console.log(u < 0.15 ? 'OK  ' : 'FAIL', `${hz} Hz screen: frame-to-frame unevenness ${(100 * u).toFixed(0)}% (latest step only: ${(100 * uneven(latest)).toFixed(0)}%)`);
 }
+
+// A prop in flight: the beach ball, thrown sideways, drawn at 60 Hz.
+{
+  const { Things } = await import('../src/things');
+  const phys = await RagdollPhysics.create();
+  phys.world.createCollider(RAPIER.ColliderDesc.cuboid(50, 0.5, 50).setTranslation(0, -0.5, 0));
+  const things = new Things(phys.world, new THREE.Scene());
+  phys.beforeStep.push(() => things.rememberPose());
+  const ball = things.list.find((t) => t.name === 'beach ball')!;
+  ball.body.setTranslation({ x: 0, y: 2, z: 5 }, true);
+  ball.body.setLinvel({ x: 3, y: 0, z: 0 }, true);
+  const xs: number[] = [];
+  let px = ball.body.translation().x;
+  for (let i = 0; i < 30; i++) {
+    phys.step(1 / 60); things.update(1 / 60, [], phys.alpha);
+    xs.push(ball.mesh.position.x - px); px = ball.mesh.position.x;
+  }
+  xs.shift(); // the first frame blends from where it was before the teleport
+  const m = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const u = Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length) / Math.abs(m);
+  console.log(u < 0.15 ? 'OK  ' : 'FAIL', `thrown ball, 60 Hz screen: frame-to-frame unevenness ${(100 * u).toFixed(0)}%`);
+}

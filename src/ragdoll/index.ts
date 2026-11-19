@@ -22,6 +22,15 @@ export class RagdollPhysics {
   readonly world: RAPIER.World;
   readonly ragdolls: ActiveRagdoll[] = [];
   private accumulator = 0;
+  /** Called before every fixed step, e.g. so props can keep their pose for drawing (see alpha). */
+  readonly beforeStep: (() => void)[] = [];
+
+  /**
+   * How far into the next physics step this frame is, 0..1: draw bodies this far from
+   * their pose before the latest step to their current one, so motion looks smooth on
+   * screens that don't run at the physics rate.
+   */
+  get alpha(): number { return this.accumulator / FIXED_DT; }
 
   private constructor() {
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
@@ -58,13 +67,14 @@ export class RagdollPhysics {
     this.accumulator += Math.min(Math.max(seconds, 0), MAX_FRAME_SECONDS);
     let steps = 0;
     while (this.accumulator >= FIXED_DT) {
+      for (const f of this.beforeStep) f();
       for (const r of this.ragdolls) { r.rememberPose(); r.fixedUpdate(FIXED_DT); }
       this.world.step();
       this.accumulator -= FIXED_DT;
       steps++;
     }
     // Draw each body between its last two steps, by how far we are into the next one.
-    const alpha = this.accumulator / FIXED_DT;
+    const alpha = this.alpha;
     for (const r of this.ragdolls) r.syncMeshes(Math.min(Math.max(seconds, 0), MAX_FRAME_SECONDS), alpha);
     return steps;
   }

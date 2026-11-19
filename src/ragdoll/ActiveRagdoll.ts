@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { BODY, EMOTION, GAIT, GRAVITY_COMP, HOVER, JUMP, KNOCKOUT, LIMITS, MOVE, MUSCLES, UPRIGHT } from './config';
+import { BODY, BUTT, EMOTION, GAIT, GRAVITY_COMP, HOVER, JUMP, KNOCKOUT, LIMITS, MOVE, MUSCLES, UPRIGHT } from './config';
 import { GooHead, type GooContact } from './goo';
 import { Face, acquireSkin, releaseSkin } from './skin';
 import { bodyDims, type BodyDims } from './proportions';
@@ -365,6 +365,15 @@ export class ActiveRagdoll {
   private readonly qErr = new THREE.Quaternion();
   private readonly qHead = new THREE.Quaternion();
   private readonly tmpV = new THREE.Vector3();
+  // The butt's jiggle: a spring bone that follows the belly (see syncMeshes).
+  private readonly buttBone = new THREE.Bone();
+  private readonly buttRest = new THREE.Vector3();
+  private readonly buttFromTorso = new THREE.Vector3();
+  private readonly torso0 = new THREE.Vector3();
+  private readonly buttVel = new THREE.Vector3();
+  private readonly buttTarget = new THREE.Vector3();
+  private readonly buttTargetVel = new THREE.Vector3();
+  private buttSettled = false;
   private readonly axisX = new THREE.Vector3(1, 0, 0);
   private readonly axisY = new THREE.Vector3(0, 1, 0);
   private readonly axisZ = new THREE.Vector3(0, 0, 1);
@@ -374,6 +383,10 @@ export class ActiveRagdoll {
     this.recipe = structuredClone(options.recipe ?? recipeFromEditor('Tenant', options.color ?? '#3a86ff', 'calm'));
     this.material = new THREE.MeshStandardMaterial({
       color: this.recipe.color, roughness: 0.7, metalness: 0,
+      // Both sides: where skinning folds the skin over itself (a fin pressed to the chest)
+      // the fold shows skin, not a hole.
+      side: THREE.DoubleSide,
+      shadowSide: THREE.BackSide, // only the inside casts shadows, so the skin doesn't shadow itself in stripes
     });
     this.baseColor.copy(this.material.color);
     const start = options.position ?? new THREE.Vector3();
@@ -419,10 +432,21 @@ export class ActiveRagdoll {
 
     // The skin. Its bind pose is the rest pose at the origin, facing +z, so each
     // bone's inverse bind matrix just undoes that part's rest position.
-    const bones = defs.map((d) => this.part(d.name).bone);
-    const boneInverses = defs.map((d) => new THREE.Matrix4().makeTranslation(-d.center.x, -d.center.y, -d.center.z));
+    // Plus one bone that isn't a physics body: the butt, which springs after the belly.
+    const C = this.dims.cheeks;
+    this.torso0.copy(defs.find((d) => d.name === 'torso')!.center);
+    this.buttRest.set(0, C.y, C.z);
+    this.buttFromTorso.copy(this.buttRest).sub(this.torso0);
+    this.buttBone.position.copy(this.buttRest).applyQuaternion(qFacing).add(start);
+    this.group.add(this.buttBone);
+    const bones = [...defs.map((d) => this.part(d.name).bone), this.buttBone];
+    const boneInverses = [
+      ...defs.map((d) => new THREE.Matrix4().makeTranslation(-d.center.x, -d.center.y, -d.center.z)),
+      new THREE.Matrix4().makeTranslation(0, -C.y, -C.z),
+    ];
     const skeleton = new THREE.Skeleton(bones, boneInverses);
-    const boneIndex = (name: string) => defs.findIndex((d) => d.name === name);
+    const boneIndex = (name: string) =>
+      name === 'butt' ? defs.length : name === '__count' ? defs.length + 1 : defs.findIndex((d) => d.name === name);
     this.skin = new THREE.SkinnedMesh(acquireSkin(boneIndex, this.dims), this.material);
     this.skin.bind(skeleton, new THREE.Matrix4());
     this.skin.castShadow = true;
@@ -668,6 +692,7 @@ export class ActiveRagdoll {
       p.body.resetForces(true);
       p.body.resetTorques(true);
     }
+    this.buttSettled = false;
     this.knockedOut = false;
     this.muscle = 1;
     this.heightIntegral = 0;
@@ -878,6 +903,47 @@ export class ActiveRagdoll {
     }
     this.goo.update(dt, this.part('head').bone.quaternion, this.headAccel, this.gooContact, this.traits.squish, this.muscle * this.muscle);
     this.face.followSurface();
+    this.jiggleButt(dt);
+  }
+
+  /**
+   * The butt bone chases its spot on the belly through an underdamped spring, so the
+   * cheeks lag, overshoot and wobble back whenever the belly moves: steps, landings,
+   * shoves. It turns with the belly. Allocation-free.
+   */
+  private jiggleButt(dt: number): void {
+    const torso = this.torso.bone;
+    const b = this.buttBone;
+    b.quaternion.copy(torso.quaternion);
+    this.buttTarget.copy(this.buttFromTorso).applyQuaternion(torso.quaternion).add(torso.position);
+    const lv = this.torso.body.linvel();
+    this.buttTargetVel.set(lv.x, lv.y, lv.z);
+    if (!this.buttSettled) { // first frame or after a teleport: start at rest
+      b.position.copy(this.buttTarget);
+      this.buttVel.copy(this.buttTargetVel);
+      this.buttSettled = true;
+      return;
+    }
+    const w = 2 * Math.PI * BUTT.frequency;
+    const k = w * w, c = 2 * BUTT.dampingRatio * w;
+    const steps = Math.max(1, Math.ceil(Math.min(dt, 0.1) / (1 / 120)));
+    const h = Math.min(dt, 0.1) / steps;
+    const maxTravel = BUTT.travel * this.dims.cheeks.r;
+    for (let i = 0; i < steps; i++) {
+      // a = k·(target − pos) + c·(targetVel − vel), semi-implicit Euler.
+      this.tmpV.copy(this.buttTarget).sub(b.position).multiplyScalar(k);
+      this.buttVel.addScaledVector(this.tmpV, h);
+      this.tmpV.copy(this.buttTargetVel).sub(this.buttVel).multiplyScalar(c);
+      this.buttVel.addScaledVector(this.tmpV, h);
+      b.position.addScaledVector(this.buttVel, h);
+    }
+    // Never let it wobble right off the body.
+    this.tmpV.copy(b.position).sub(this.buttTarget);
+    const d = this.tmpV.length();
+    if (d > maxTravel) {
+      b.position.copy(this.buttTarget).addScaledVector(this.tmpV, maxTravel / d);
+      this.buttVel.copy(this.buttTargetVel);
+    }
   }
 
   /** Belly centre in world space. */

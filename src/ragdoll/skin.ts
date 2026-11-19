@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SKIN } from './config';
+import { blendedSkin, type Shape } from './blendskin';
 import type { BodyDims, FaceShape } from './proportions';
 import { NEUTRAL, type FaceLetter, type Letters } from './mood';
 import type { GooHead } from './goo';
@@ -18,7 +18,6 @@ import type { GooHead } from './goo';
 /** Which bone (by index into the skeleton) each named part is. Supplied by the ragdoll. */
 export type BoneIndex = (part: string) => number;
 
-/** Up to two bone influences: [boneA, boneB, weightA, weightB]. */
 type Influence = [number, number, number, number];
 
 /** Blend from bone `a` (below) to bone `b` (above) across `at ± half` in height. */
@@ -26,63 +25,6 @@ function blendAcross(a: number, b: number, y: number, at: number, half: number):
   const t = THREE.MathUtils.smoothstep(y, at - half, at + half);
   return [a, b, 1 - t, t];
 }
-
-/**
- * A smooth closed surface around a vertical axis at (cx, cz), through the
- * [height, radius] profile (bottom to top). Where the radius reaches 0 it closes
- * to a point. `squashZ` flattens the cross-section front-to-back (for the fins).
- */
-function lathe(
-  profile: readonly (readonly [number, number])[],
-  cx: number, cz: number, yOffset: number, squashZ: number,
-  influence: (y: number) => Influence,
-  radial: number = SKIN.radialSegments,
-  /** Optional × on the radius at height y and angle a (a = 3π/2 points straight back). */
-  bulge?: (y: number, a: number) => number,
-): THREE.BufferGeometry {
-  // A smooth curve through the profile points, sampled evenly.
-  const curve = new THREE.SplineCurve(profile.map(([h, r]) => new THREE.Vector2(h, r)));
-  const rings = (profile.length - 1) * SKIN.samplesPerSegment + 1;
-
-  const positions: number[] = [];
-  const skinIndex: number[] = [];
-  const skinWeight: number[] = [];
-  const index: number[] = [];
-  const p = new THREE.Vector2();
-
-  for (let i = 0; i < rings; i++) {
-    curve.getPoint(i / (rings - 1), p);
-    const y = p.x + yOffset;
-    const r = Math.max(0, p.y);
-    const inf = influence(y);
-    for (let j = 0; j < radial; j++) {
-      const a = (j / radial) * Math.PI * 2;
-      const rr = bulge ? r * bulge(y, a) : r;
-      positions.push(cx + Math.cos(a) * rr, y, cz + Math.sin(a) * rr * squashZ);
-      skinIndex.push(inf[0], inf[1], 0, 0);
-      skinWeight.push(inf[2], inf[3], 0, 0);
-    }
-  }
-  // Quads between neighbouring rings, wrapping round (no seam column, so normals stay smooth).
-  for (let i = 0; i < rings - 1; i++) {
-    for (let j = 0; j < radial; j++) {
-      const a = i * radial + j;
-      const b = i * radial + ((j + 1) % radial);
-      const c = (i + 1) * radial + j;
-      const d = (i + 1) * radial + ((j + 1) % radial);
-      index.push(a, c, b, b, c, d); // wound so faces point outward
-    }
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndex, 4));
-  geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeight, 4));
-  geo.setIndex(index);
-  geo.computeVertexNormals();
-  return geo;
-}
-
 
 /** Skins by body dimensions, shared by every ragdoll of that shape, with a count of users. */
 const skins = new Map<string, { geometry: THREE.BufferGeometry; users: number }>();
@@ -110,51 +52,64 @@ export function releaseSkin(dims: BodyDims): void {
   }
 }
 
+/**
+ * The rest-pose skin: belly, legs, fins and butt cheeks as one blended surface
+ * (blendskin.ts), each limb melting into the body with a soft fillet.
+ */
 function buildSkin(bone: BoneIndex, B: BodyDims): THREE.BufferGeometry {
   const belly = bone('torso');
   const chest = bone('chest');
-  const parts: THREE.BufferGeometry[] = [];
-
-  // Body: belly below the spine joint, chest above, blended across it so it bends softly.
-  // A little butt: two round cheeks low on the back, just above where the legs come
-  // out, with a soft crease between them. The body gets extra segments round its
-  // middle (a multiple of 4, so one column runs straight down the back for the crease).
-  const h0 = B.skin.body[0][0], h1 = B.skin.body[B.skin.body.length - 1][0];
-  const buttY = h0 + 0.24 * (h1 - h0), buttH = 0.11 * (h1 - h0);
-  const back = Math.PI * 1.5;
-  const bulge = B.butt > 0 ? (y: number, a: number) => {
-    const da = Math.abs(a - back); // angle round from straight back (front is never near)
-    const cheeks = Math.exp(-(((da - 0.42) / 0.3) ** 2));
-    const height = Math.exp(-(((y - buttY) / buttH) ** 2));
-    return 1 + 0.45 * B.butt * cheeks * height;
-  } : undefined;
-  parts.push(lathe(B.skin.body, 0, 0, 0, 1, (y) => blendAcross(belly, chest, y, B.spineY, 0.05), 24, bulge));
-
+  const shapes: Shape[] = [];
+  const size = B.bellyR / 0.089; // fillets and cells scale with the body
+  shapes.push({
+    profile: B.skin.body, cx: 0, cz: 0, yOffset: 0, squashZ: 1, group: 'body', blend: 0,
+    influence: (y) => blendAcross(belly, chest, y, B.spineY, 0.05),
+  });
   for (const [side, sx] of [['L', 1], ['R', -1]] as const) {
     const thigh = bone(`thigh${side}`);
     const shin = bone(`shin${side}`);
     const kneeY = B.hipY - B.thighLen;
     // Legs: shin at the tip, thigh in the middle, melting into the belly at the hip.
-    parts.push(lathe(B.skin.leg, sx * B.hipX, 0, 0, 1, (y) =>
-      y > (B.hipY + kneeY) / 2
+    shapes.push({
+      profile: B.skin.leg, cx: sx * B.hipX, cz: 0, yOffset: 0, squashZ: 1, group: 'limb', blend: 0.03 * size,
+      root: { x: sx * B.hipX, y: B.hipY, z: 0, radius: 0.05 * size },
+      influence: (y) => y > (B.hipY + kneeY) / 2
         ? blendAcross(thigh, belly, y, B.hipY, 0.03)
-        : blendAcross(shin, thigh, y, kneeY, 0.03)));
-
+        : blendAcross(shin, thigh, y, kneeY, 0.03),
+    });
     const upper = bone(`upperArm${side}`);
     const fore = bone(`forearm${side}`);
     const elbowY = B.shoulderY - B.upperArmLen;
-    // Fins: forearm at the tip, upper arm above the elbow, rooted in the chest.
-    parts.push(lathe(B.skin.arm, sx * B.shoulderX, 0, B.shoulderY, SKIN.armThickness, (y) =>
-      y > (B.shoulderY + elbowY) / 2
+    // Fins: forearm at the tip, upper arm above the elbow, rooted in the chest. Built
+    // swung out from the shoulder so they don't melt into the belly's sides.
+    shapes.push({
+      profile: B.skin.arm, cx: sx * B.shoulderX, cz: 0, yOffset: B.shoulderY, squashZ: SKIN.armThickness,
+      group: 'limb', blend: 0.018 * size,
+      swing: { px: sx * B.shoulderX, py: B.shoulderY, angle: sx * SKIN.finSplay, bones: [upper, fore] },
+      root: { x: sx * B.shoulderX, y: B.shoulderY, z: 0, radius: 0.03 * size },
+      influence: (y) => y > (B.shoulderY + elbowY) / 2
         ? blendAcross(upper, chest, y, B.shoulderY, 0.02)
-        : blendAcross(fore, upper, y, elbowY, 0.05)));
+        : blendAcross(fore, upper, y, elbowY, 0.05),
+    });
   }
-
-  // The head isn't part of the skin: it's its own mesh of goo (goo.ts) on the head bone.
-
-  const merged = mergeGeometries(parts, false);
-  for (const g of parts) g.dispose();
-  return merged;
+  // Butt: two round cheeks low on the back, on their own springy bone so they jiggle.
+  const C = B.cheeks;
+  if (C.r > 0) {
+    const butt = bone('butt');
+    const R = C.r;
+    const ball: [number, number][] = [];
+    for (let i = 0; i <= 12; i++) {
+      const t = Math.PI * (i / 12 - 0.5);
+      ball.push([Math.sin(t) * R * 0.95, Math.cos(t) * R]);
+    }
+    for (const sx of [1, -1]) {
+      shapes.push({
+        profile: ball, cx: sx * C.x, cz: C.z, yOffset: C.y, squashZ: 0.9, group: 'limb', blend: 0.6 * R,
+        influence: () => [butt, belly, 0.85, 0.15],
+      });
+    }
+  }
+  return blendedSkin(shapes, 0.006 * size, bone('__count'));
 }
 
 // ---- The face: rigid little meshes that ride on the head bone ----

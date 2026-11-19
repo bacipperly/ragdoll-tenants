@@ -76,6 +76,11 @@ function buildEntries(): Record<string, Entry[]> {
       { path: 'PROPORTIONS.blush', label: 'blush', min: 0, max: 1, step: 0.01 },
       { path: 'PROPORTIONS.mouthWidth', label: 'mouth width', min: 0.5, max: 2, step: 0.01 },
     ],
+    'Butt jiggle': [
+      { path: 'BUTT.frequency', label: 'wobble speed (Hz)', min: 1.5, max: 10, step: 0.1 },
+      { path: 'BUTT.dampingRatio', label: 'settle (low = bouncier)', min: 0.05, max: 1, step: 0.01 },
+      { path: 'BUTT.travel', label: 'max wobble', min: 0, max: 0.8, step: 0.01 },
+    ],
     'Head': [
       { path: 'GOO.firmness', label: 'firmness', min: 5, max: 150, step: 1 },
       { path: 'GOO.viscosity', label: 'thickness (ooze)', min: 0.5, max: 30, step: 0.5 },

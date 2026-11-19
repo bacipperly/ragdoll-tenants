@@ -75,7 +75,7 @@ export const PROPORTIONS = {
   shoulderWidth: 1, // broadens the upper body and sets the fins further apart
   hipWidth: 1, // widens the lower body and sets the legs further apart
   waist: 0, // 0 = the drawn teardrop; higher pinches in the middle
-  butt: 0.6, // 0 = smooth back; higher = two round cheeks low on the back of the belly
+  butt: 0.8, // 0 = smooth back; higher = two round, bouncy cheeks low on the back
   // Face (scaled with the head).
   eyeSize: 1,
   eyeSpacing: 1,
@@ -117,10 +117,19 @@ export const SKIN = {
   ],
   /** Fins are flat: this squashes their cross-section front-to-back. */
   armThickness: 0.5,
+  /** Fins are blended into the body swung out this far (rad), roughly how they're held. */
+  finSplay: 0.9,
   radialSegments: 14,
   /** Smoothing samples per profile segment. */
   samplesPerSegment: 4,
 } as const satisfies Record<string, unknown>;
+
+/** The butt's jiggle: a spring the cheeks ride on, chasing the belly. */
+export const BUTT = {
+  frequency: 4.5, // Hz: lower is a slower, heavier wobble
+  dampingRatio: 0.18, // lower = bouncier, keeps wobbling longer
+  travel: 0.35, // the furthest the cheeks swing from rest, in cheek radii
+};
 
 /**
  * Joint "muscles". Each is a spring-damper toward the pose target, given as:

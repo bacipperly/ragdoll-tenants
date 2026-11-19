@@ -95,8 +95,8 @@ export interface BodyDims {
   /** Total height, leg tips to top of head. */
   height: number;
   skin: { body: Profile; leg: Profile; arm: Profile };
-  /** How round the cheeks on the back of the belly are (0 = none). */
-  butt: number;
+  /** The butt: two cheek balls at (±x, y, z) of radius r, in the rest pose (r 0 = none). */
+  cheeks: { x: number; y: number; z: number; r: number };
   /** Face features, in the drawn head's units (the face is scaled with the head). */
   face: FaceShape;
   /** Identifies this set of dimensions (for sharing skin geometry). */
@@ -126,12 +126,13 @@ export function bodyDims(base: Proportions = PROPORTIONS, traits: Traits = TRAIT
   const headY = neckY + (B.headY - B.headR - B.neckY) * P.headFloat + headR;
 
   const r4 = (n: number) => Math.round(n * 1e4) / 1e4;
+  const bellyR = B.bellyR * bw * (1 + 0.5 * (P.hipWidth - 1));
   const dims: Omit<BodyDims, 'key'> = {
     // Wider hips set the legs further apart; wider shoulders the fins.
     hipY, hipX: (B.hipX + (P.hipWidth - 1) * 0.03) * bw,
     thighLen: B.thighLen * ll, thighR: B.thighR * lt,
     shinLen: B.shinLen * ll, shinR: B.shinR * lt,
-    bellyY, bellyR: B.bellyR * bw * (1 + 0.5 * (P.hipWidth - 1)), bellyLen,
+    bellyY, bellyR, bellyLen,
     spineY, chestR: B.chestR * bw * (1 + 0.5 * (P.shoulderWidth - 1)), chestLen: B.chestLen * bh,
     neckY, headY, headR, headColliderR: B.headColliderR * hs, headScale: hs,
     shoulderX: (B.shoulderX + (P.shoulderWidth - 1) * 0.04) * bw, shoulderY,
@@ -146,7 +147,11 @@ export function bodyDims(base: Proportions = PROPORTIONS, traits: Traits = TRAIT
       leg: SKIN.leg.map(([h, r]) => [h * ll, r * lt] as const),
       arm: SKIN.arm.map(([h, r]) => [h * fl, r * fw] as const),
     },
-    butt: P.butt,
+    // Bigger butts are bigger balls set further back: they bulge out round and full.
+    cheeks: P.butt > 0.01 ? {
+      x: (0.36 + 0.08 * P.butt) * bellyR, y: hipY + 0.12 * bellyR,
+      z: -(0.42 + 0.22 * P.butt) * bellyR, r: (0.38 + 0.28 * P.butt) * bellyR,
+    } : { x: 0, y: 0, z: 0, r: 0 },
     face: {
       eyeSize: P.eyeSize, eyeSpacing: P.eyeSpacing, eyeHeight: P.eyeHeight,
       lashes: P.lashes, blush: P.blush, mouthWidth: P.mouthWidth,

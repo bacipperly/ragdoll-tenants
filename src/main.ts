@@ -269,7 +269,7 @@ function frame(now: number) {
 
   // Follow the torso, smoothed so the camera doesn't inherit the wobble. Both cameras
   // move by the same amount as the orbit centre, so the orbit angle and zoom are kept.
-  ragdoll.middle(camPos);
+  ragdoll.drawnMiddle(camPos);
   followDelta.copy(focus);
   focus.lerp(camPos, 1 - Math.exp(-Math.min(dt, 0.1) * 6));
   followDelta.subVectors(focus, followDelta);

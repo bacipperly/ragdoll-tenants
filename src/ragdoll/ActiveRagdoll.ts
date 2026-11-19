@@ -176,6 +176,9 @@ interface Part {
   collider: RAPIER.Collider;
   /** Its mass, read once (it never changes), so the per-step code needn't ask Rapier. */
   mass: number;
+  /** Its pose before the latest physics step: the drawn pose blends from this to the current one. */
+  prevPos: THREE.Vector3;
+  prevRot: THREE.Quaternion;
 }
 
 interface Joint {
@@ -379,6 +382,7 @@ export class ActiveRagdoll {
   private readonly qErr = new THREE.Quaternion();
   private readonly qHead = new THREE.Quaternion();
   private readonly tmpV = new THREE.Vector3();
+  private readonly tmpQ = new THREE.Quaternion();
   // The butt's jiggle: a spring bone that follows the belly (see syncMeshes).
   private readonly buttBone = new THREE.Bone();
   private readonly buttRest = new THREE.Vector3();
@@ -439,7 +443,7 @@ export class ActiveRagdoll {
       const debugMesh = new THREE.Mesh(capsuleGeometry(def.halfHeight, def.radius), skeletonMaterial);
       debugMesh.renderOrder = 20;
       this.skeletonGroup.add(debugMesh);
-      this.parts.set(def.name, { def, body, bone, debugMesh, collider, mass: body.mass() });
+      this.parts.set(def.name, { def, body, bone, debugMesh, collider, mass: body.mass(), prevPos: p.clone(), prevRot: qFacing.clone() });
     }
     this.skeletonGroup.visible = false;
     this.group.add(this.skeletonGroup);
@@ -730,9 +734,24 @@ export class ActiveRagdoll {
     this.material.color.copy(this.baseColor);
     this.poseLimbs();
     this.applyMotors();
+    this.rememberPose(); // a teleport: don't draw it sliding across from where it was
   }
 
   // ------------------------------------------------------------------ stepping
+
+  /**
+   * Call before each world.step(): keeps every body's pose, so syncMeshes can draw the body
+   * partway between the last two steps. Physics runs at a fixed rate the screen doesn't
+   * match (90 Hz on a 60 Hz screen is 1, 2, 1, 2 steps a frame), and drawing only the
+   * latest step makes the body stutter against a smoothly moving camera.
+   */
+  rememberPose(): void {
+    for (const p of this.parts.values()) {
+      const t = p.body.translation(), r = p.body.rotation();
+      p.prevPos.set(t.x, t.y, t.z);
+      p.prevRot.set(r.x, r.y, r.z, r.w);
+    }
+  }
 
   /** Call once per fixed physics step, BEFORE world.step(). */
   fixedUpdate(dt: number): void {
@@ -896,13 +915,18 @@ export class ActiveRagdoll {
   }
 
   /** Copies body transforms onto the skin's bones. Call once per rendered frame. */
-  syncMeshes(dt = 1 / 60): void {
+  /**
+   * @param alpha how far the drawn pose is from the previous physics step (0) to the
+   *   latest (1); see rememberPose.
+   */
+  syncMeshes(dt = 1 / 60, alpha = 1): void {
     const showSkeleton = this.skeletonGroup.visible;
     for (const p of this.parts.values()) {
       const t = p.body.translation();
       const r = p.body.rotation();
-      p.bone.position.set(t.x, t.y, t.z);
-      p.bone.quaternion.set(r.x, r.y, r.z, r.w);
+      p.bone.position.set(t.x, t.y, t.z).sub(p.prevPos).multiplyScalar(alpha).add(p.prevPos);
+      this.tmpQ.set(r.x, r.y, r.z, r.w);
+      p.bone.quaternion.slerpQuaternions(p.prevRot, this.tmpQ, alpha);
       if (showSkeleton) {
         p.debugMesh.position.copy(p.bone.position);
         p.debugMesh.quaternion.copy(p.bone.quaternion);
@@ -965,6 +989,11 @@ export class ActiveRagdoll {
       b.position.copy(this.buttTarget).addScaledVector(this.tmpV, maxTravel / d);
       this.buttVel.copy(this.buttTargetVel);
     }
+  }
+
+  /** Belly centre as drawn this frame (between physics steps): for cameras to follow. */
+  drawnMiddle(target: THREE.Vector3): THREE.Vector3 {
+    return target.copy(this.torso.bone.position);
   }
 
   /** Belly centre in world space. */

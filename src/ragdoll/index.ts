@@ -58,12 +58,14 @@ export class RagdollPhysics {
     this.accumulator += Math.min(Math.max(seconds, 0), MAX_FRAME_SECONDS);
     let steps = 0;
     while (this.accumulator >= FIXED_DT) {
-      for (const r of this.ragdolls) r.fixedUpdate(FIXED_DT);
+      for (const r of this.ragdolls) { r.rememberPose(); r.fixedUpdate(FIXED_DT); }
       this.world.step();
       this.accumulator -= FIXED_DT;
       steps++;
     }
-    for (const r of this.ragdolls) r.syncMeshes(Math.min(Math.max(seconds, 0), MAX_FRAME_SECONDS));
+    // Draw each body between its last two steps, by how far we are into the next one.
+    const alpha = this.accumulator / FIXED_DT;
+    for (const r of this.ragdolls) r.syncMeshes(Math.min(Math.max(seconds, 0), MAX_FRAME_SECONDS), alpha);
     return steps;
   }
 }

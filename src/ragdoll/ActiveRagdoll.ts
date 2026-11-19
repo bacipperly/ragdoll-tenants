@@ -1147,7 +1147,7 @@ export class ActiveRagdoll {
     const kick = this.carried ? 1 : 0;
     const flail = (rate: number, phase: number) => kick * Math.sin(this.time * rate + phase);
     const hold = this.hold;
-    // Front: fins swing forward and wrap in round it. Overhead: fins straight up.
+    // Front: fins swing forward and wrap in round it. Overhead: fins up in a V, straight.
     const hugging = this.holdStyle === 'front' ? hold : 0;
     const hoisting = this.holdStyle === 'overhead' ? hold : 0;
     // Rates of change of s and c, for the motors' velocity targets.
@@ -1232,19 +1232,20 @@ export class ActiveRagdoll {
         case 'upperArmL':
         case 'upperArmR': {
           // Fins swing opposite to the leg on the same side, splayed out as in the drawing.
-          const armSwing = -(left ? s : -s) * armSwingAmp * w;
+          // No swinging while holding something: the fins are busy.
+          const armSwing = -(left ? s : -s) * armSwingAmp * w * (1 - hold);
           // Fin letters: pulled back or held forward; flared or tucked; raised high or
           // drooping (a droop also pulls them in). Plus fidgety twitches and trembling.
           const lift = 0.9 * Math.max(0, P.finsLift) + 0.35 * Math.min(0, P.finsLift);
           j.target.set(
             -armSwing + 0.7 * P.finsBack + 0.25 * P.fidget * this.noise(left ? 3 : 4) - (left ? X.finFwdL : X.finFwdR)
-              - 0.3 * hoisting - 1.25 * hugging,
+              - 0.15 * hoisting - 1.25 * hugging,
             0,
             side * (GAIT.armOut + 0.03 * breathe * (1 - w) + 0.35 * P.finsSpread + lift
               + JUMP.finsUp * this.air + 0.05 * shake(41) + (left ? X.finRaiseL : X.finRaiseR)
-              + 1.6 * hoisting - 0.25 * hugging + kick * 0.7 + 0.5 * flail(9, left ? 0 : 1.7)),
+              + 1.75 * hoisting - 0.25 * hugging + kick * 0.7 + 0.5 * flail(9, left ? 0 : 1.7)),
           );
-          j.targetVel.x = (left ? ds : -ds) * armSwingAmp * w;
+          j.targetVel.x = (left ? ds : -ds) * armSwingAmp * w * (1 - hold);
           break;
         }
         case 'forearmL':
@@ -1253,7 +1254,8 @@ export class ActiveRagdoll {
           // swings forward, like a flipper following through.
           const swingingForward = Math.max(0, -(left ? s : -s)) * w;
           // Elbow letter: bent forward (the hinge stops it bending far backward).
-          j.target.set(-(GAIT.finCurl + GAIT.finFollow * swingingForward + 0.9 * P.elbowBend + (left ? X.elbowL : X.elbowR) + 0.5 * hoisting + 0.9 * hugging), 0, 0);
+          // Hoisting straightens the fins into a clear V above the shoulders.
+          j.target.set(-((GAIT.finCurl + GAIT.finFollow * swingingForward + 0.9 * P.elbowBend + (left ? X.elbowL : X.elbowR)) * (1 - hoisting) + 0.9 * hugging), 0, 0);
           break;
         }
       }
@@ -1275,8 +1277,11 @@ export class ActiveRagdoll {
       const g = j.def.gains!;
       // Traits: a baby's neck is extra wobbly, a senior's joints stiffer and slower.
       const neck = j.def.name === 'head';
-      const freq = g.frequency * tension * (neck ? this.traits.neckSpeed : this.traits.muscleSpeed);
-      const ratio = g.dampingRatio * (neck ? this.traits.neckDamping : this.traits.muscleDamping);
+      // Holding something braces the shoulders: firmer and calmer, so the pose holds
+      // while walking instead of the fins sagging and flapping.
+      const brace = j.def.jointType === 'ball' && j.def.name.startsWith('upperArm') ? this.hold : 0;
+      const freq = g.frequency * tension * (neck ? this.traits.neckSpeed : this.traits.muscleSpeed) * (1 + 0.8 * brace);
+      const ratio = g.dampingRatio * (neck ? this.traits.neckDamping : this.traits.muscleDamping) * (1 + 0.8 * brace);
       // Spring-damper with natural frequency ω and damping ratio ζ on inertia I:
       // stiffness = I·ω², damping = 2·ζ·ω·I.
       const k = j.inertia * freq * freq * strength;

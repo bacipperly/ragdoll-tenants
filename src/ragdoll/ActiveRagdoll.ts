@@ -41,21 +41,28 @@ import { GesturePlayer, GESTURE_NAMES, type GestureEvent, type GestureName } fro
 
 /** Collision groups: 16 bits of "what I am" << 16, then 16 bits of "what I collide with". */
 const GROUP_WORLD = 0x0001;
-const GROUP_RAGDOLL = 0x0002;
 const groups = (membership: number, filter: number) => ((membership << 16) | filter) >>> 0;
 /**
- * Ragdoll parts collide with the world only, never with each other. This is the
- * "disable self-collision" rule: overlapping capsules at the shoulders and hips
- * would otherwise fight the joints and jitter.
- * (It also means two ragdolls pass through each other. Give each ragdoll its own
- * group bit if that's ever needed.)
+ * Each tenant gets its own group bit (bits 1..15), and collides with the world and every
+ * other tenant's bit, but not its own. That keeps self-collision off (overlapping capsules
+ * at the shoulders and hips would fight the joints and jitter) while tenants bump into
+ * each other. Past 15 tenants, bits are shared, and tenants sharing one pass through
+ * each other.
  */
-const LIMB_GROUPS = groups(GROUP_RAGDOLL, GROUP_WORLD);
-/**
- * For things that should behave like a ragdoll part while held (e.g. a crate carried
- * overhead): they then don't bump the carrier or block its hover ray.
- */
-export const RAGDOLL_COLLISION_GROUPS = groups(GROUP_RAGDOLL, GROUP_WORLD);
+const FIRST_TENANT_BIT = 1, TENANT_BITS = 15;
+const ALL_TENANTS = ((1 << (FIRST_TENANT_BIT + TENANT_BITS)) - 1) & ~GROUP_WORLD;
+/** How many live tenants hold each bit. */
+const bitUsers = new Array<number>(TENANT_BITS).fill(0);
+function takeTenantBit(): number {
+  let best = 0;
+  for (let i = 1; i < TENANT_BITS; i++) if (bitUsers[i] < bitUsers[best]) best = i;
+  bitUsers[best]++;
+  return best;
+}
+const tenantGroups = (slot: number) => {
+  const bit = 1 << (FIRST_TENANT_BIT + slot);
+  return groups(bit, GROUP_WORLD | (ALL_TENANTS & ~bit));
+};
 /** The hover ray only sees the world, so it never hits the ragdoll's own legs. */
 const RAY_GROUPS = groups(GROUP_WORLD, GROUP_WORLD);
 
@@ -241,6 +248,13 @@ export class ActiveRagdoll {
   /** Its look, as given (or as the shared look was when it was made). Kept up to date by setColor. */
   readonly recipe: Recipe;
   private readonly parts = new Map<PartName, Part>();
+  /** This tenant's collision bit (see takeTenantBit). */
+  private readonly collisionSlot = takeTenantBit();
+  /**
+   * The collision groups its body uses: the world and other tenants, never itself.
+   * Something it holds uses these too, so it doesn't bump its carrier.
+   */
+  readonly collisionGroups = tenantGroups(this.collisionSlot);
   private readonly joints: Joint[] = [];
   private readonly torso: Part;
   private readonly chest: Part;
@@ -414,7 +428,7 @@ export class ActiveRagdoll {
         RAPIER.ColliderDesc.capsule(def.halfHeight, def.radius)
           .setDensity(def.density)
           .setFriction(BODY.limbFriction)
-          .setCollisionGroups(LIMB_GROUPS),
+          .setCollisionGroups(this.collisionGroups),
         body,
       );
       const bone = new THREE.Bone();
@@ -978,7 +992,17 @@ export class ActiveRagdoll {
     };
   }
 
+  /**
+   * Makes this tenant's body pass through `other` (it takes `other`'s groups), e.g. while
+   * `other` holds it overhead. `null` goes back to its own.
+   */
+  shareCollisionWith(other: ActiveRagdoll | null): void {
+    const g = other ? other.collisionGroups : this.collisionGroups;
+    for (const p of this.parts.values()) p.collider.setCollisionGroups(g);
+  }
+
   dispose(): void {
+    bitUsers[this.collisionSlot]--;
     for (const p of this.parts.values()) this.world.removeRigidBody(p.body); // also removes its colliders + joints
     this.parts.clear();
     this.joints.length = 0;

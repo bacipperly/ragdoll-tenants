@@ -14,7 +14,6 @@
 import * as THREE from 'three';
 import type { ActiveRagdoll } from './ragdoll';
 import { RAPIER } from './ragdoll';
-import { RAGDOLL_COLLISION_GROUPS } from './ragdoll/ActiveRagdoll';
 
 export interface Thing {
   name: string;
@@ -237,7 +236,7 @@ export class Carry {
     th.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     th.body.setGravityScale(0, true); // weightless while held
     const groups = th.collider.collisionGroups();
-    th.collider.setCollisionGroups(RAGDOLL_COLLISION_GROUPS); // no bumping the carrier's head
+    th.collider.setCollisionGroups(who.collisionGroups); // no bumping the carrier's head
     const hp = who.holdPoint(th.size);
     const joint = this.world.createImpulseJoint(RAPIER.JointData.spherical(hp, { x: 0, y: 0, z: 0 }), who.chestBody, th.body, true);
     return { kind: 'thing', thing: th, joint, groups };
@@ -250,6 +249,7 @@ export class Carry {
     const feet = at.clone(); feet.y -= r.dims.bellyY;
     r.reset(feet, r.debugState().facing);
     r.setCarried(true);
+    r.shareCollisionWith(who); // held overhead, it mustn't bump its carrier's head
     this.flying.delete(r);
     const joint = this.world.createImpulseJoint(
       RAPIER.JointData.spherical(who.holdPoint(extra, 'overhead'), { x: 0, y: 0, z: 0 }), who.chestBody, r.bellyBody, true,
@@ -271,6 +271,7 @@ export class Carry {
     } else {
       const r = h.tenant;
       r.setCarried(false);
+      r.shareCollisionWith(null);
       if (fling.lengthSq() > 0.5) {
         // Thrown: limp in the air, tumbling, then up again a moment after landing.
         r.setKnockedOut(true);

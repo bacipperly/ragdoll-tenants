@@ -325,6 +325,9 @@ export class ActiveRagdoll {
   private tumbleTimer = 0;
   private tumbling = false;
   private bumpCooldown = 0;
+  /** Who's carrying it overhead, if anyone (see setCarried). */
+  private carrier: ActiveRagdoll | null = null;
+  private carryExtra = 0;
   /** Phase of the breathing cycle (its rate changes with energy, so it's accumulated). */
   private breathPhase = 0;
   /** Eased 0..1 serious "game face", worn while jumping. */
@@ -701,7 +704,14 @@ export class ActiveRagdoll {
    * startled. Balance, hover and walking are off. Let go of it with `setCarried(false)`;
    * to throw it, knock it out first (it goes limp in the air and gets up after landing).
    */
-  setCarried(on: boolean): void {
+  /**
+   * @param by who's holding it overhead (`extra` above its head, see holdPoint). It's
+   *   pulled to that spot by a spring on itself alone, not a joint, so its weight and
+   *   flailing never swing the carrier about.
+   */
+  setCarried(on: boolean, by: ActiveRagdoll | null = null, extra = 0): void {
+    this.carrier = on ? by : null;
+    this.carryExtra = extra;
     if (on === this.carried) return;
     this.carried = on;
     if (on) {
@@ -876,6 +886,7 @@ export class ActiveRagdoll {
       }
       this.surpriseTimer = Math.max(this.surpriseTimer, 0.3);
       this.grounded = false;
+      if (this.carrier) this.followCarrier();
     } else if (strength > 0) {
       this.applyGravityCompensation(strength);
       this.updateJump(dt);
@@ -932,6 +943,31 @@ export class ActiveRagdoll {
       const k = 0.4 + 0.4 * s;
       this.tumble(this.tmpV.set((dx / h) * k, 0.3, (dz / h) * k));
     }
+  }
+
+  /**
+   * Carried overhead: a stiff spring-damper pulls the belly to the carrier's hold point
+   * and matches the chest's velocity there. It acts on this body only, so the carrier
+   * feels nothing: a held tenant is as easy to carry as it looks. Allocation-free.
+   */
+  private followCarrier(): void {
+    const c = this.carrier!;
+    if (!c.torso.body.isValid()) return;
+    const chest = c.chest.body;
+    const hp = c.holdPoint(this.carryExtra, 'overhead');
+    const r = chest.rotation(), ct = chest.translation(), cv = chest.linvel(), cw = chest.angvel();
+    this.tmpQ.set(r.x, r.y, r.z, r.w);
+    this.tmpAxis.set(hp.x, hp.y, hp.z).applyQuaternion(this.tmpQ); // chest → hold point, world
+    // The hold point's velocity: the chest's, plus its spin carrying the point round.
+    const vx = cv.x + cw.y * this.tmpAxis.z - cw.z * this.tmpAxis.y;
+    const vy = cv.y + cw.z * this.tmpAxis.x - cw.x * this.tmpAxis.z;
+    const vz = cv.z + cw.x * this.tmpAxis.y - cw.y * this.tmpAxis.x;
+    const t = this.torso.body.translation(), v = this.torso.body.linvel();
+    const w = 2 * Math.PI * 7, k = w * w, damp = 2 * 0.8 * w, m = this.totalMass;
+    this.force.x = m * (k * (ct.x + this.tmpAxis.x - t.x) + damp * (vx - v.x));
+    this.force.y = m * (k * (ct.y + this.tmpAxis.y - t.y) + damp * (vy - v.y));
+    this.force.z = m * (k * (ct.z + this.tmpAxis.z - t.z) + damp * (vz - v.z));
+    this.torso.body.addForce(this.force, true);
   }
 
   /** Slipped off an edge or tripped up, or lying there after one. */

@@ -27,4 +27,20 @@ for (const th of things.list) {
   ok &&= good;
   console.log(good ? 'OK  ' : 'FAIL', `${th.name} (grabbed ${got}): holding tilt ${hold.t.toFixed(0)}°, lifted ${hold.up.toFixed(2)} | jump tilt ${jump.t.toFixed(0)}° | still holding ${!!carry.held}`);
 }
+// Carrying another tenant overhead: walking and turning with it barely more wobbly
+// than empty-handed, and it stays up there.
+{
+  carry.release(new THREE.Vector3());
+  const b: any = phys.createRagdoll({ position: new THREE.Vector3(6, 0, 6.4), facing: Math.PI });
+  const both = [a, b];
+  a.reset(new THREE.Vector3(6, 0, 6), 0); step(60);
+  const got = carry.grab(a, things, both);
+  let t = 0, drift = 0;
+  const near = () => { const w = new THREE.Vector3(); (carry as any).holdWorld(a, b.dims.bellyR + 0.02, w, 'overhead'); const p = b.bellyBody.translation(); return w.distanceTo(new THREE.Vector3(p.x, p.y, p.z)); };
+  const go = (x: number, z: number, n: number) => { a.setMoveInput(x, z); for (let i = 0; i < n; i++) { phys.step(1 / 60); things.update(1 / 60, both); carry.update(1 / 60, both); t = Math.max(t, tilt()); drift = Math.max(drift, near()); } };
+  go(0, 0, 60); go(0, 1, 90); go(1, 0, 90); go(0, 0, 60);
+  const good = !!got && b.isCarried && t < 40 && drift < 0.12;
+  ok &&= good;
+  console.log(good ? 'OK  ' : 'FAIL', `carrying ${got} overhead, walking and turning: carrier max tilt ${t.toFixed(0)}°, held tenant within ${drift.toFixed(2)} of the spot`);
+}
 console.log(ok ? 'all OK' : 'SOME FAILED');

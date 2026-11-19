@@ -192,7 +192,7 @@ const HELD_MASS_SHARE = 0.05;
 
 type Held =
   | { kind: 'thing'; thing: Thing; joint: RAPIER.ImpulseJoint; groups: number; density: number }
-  | { kind: 'tenant'; tenant: ActiveRagdoll; joint: RAPIER.ImpulseJoint };
+  | { kind: 'tenant'; tenant: ActiveRagdoll; joint: null };
 
 /** One tenant (the selected one) carrying one thing or tenant at a time. */
 export class Carry {
@@ -286,20 +286,19 @@ export class Carry {
     const at = this.holdWorld(who, extra, new THREE.Vector3(), 'overhead');
     const feet = at.clone(); feet.y -= r.dims.bellyY;
     r.reset(feet, r.debugState().facing);
-    r.setCarried(true);
+    // No joint: it springs itself to the spot (see ActiveRagdoll.setCarried), so its
+    // weight overhead can't swing the carrier about like an upside-down pendulum.
+    r.setCarried(true, who, extra);
     r.shareCollisionWith(who); // held overhead, it mustn't bump its carrier's head
     this.flying.delete(r);
-    const joint = this.world.createImpulseJoint(
-      RAPIER.JointData.spherical(who.holdPoint(extra, 'overhead'), { x: 0, y: 0, z: 0 }), who.chestBody, r.bellyBody, true,
-    );
-    return { kind: 'tenant', tenant: r, joint };
+    return { kind: 'tenant', tenant: r, joint: null };
   }
 
   /** Lets go. `fling` is the throw velocity (world, units/s); zero puts it down gently. */
   release(fling: THREE.Vector3): void {
     const h = this.held;
     if (!h) return;
-    if (h.joint.isValid()) this.world.removeImpulseJoint(h.joint, true);
+    if (h.joint?.isValid()) this.world.removeImpulseJoint(h.joint, true);
     if (h.kind === 'thing') {
       const b = h.thing.body;
       b.setGravityScale(1, true);
@@ -335,7 +334,7 @@ export class Carry {
   update(dt: number, tenants: readonly ActiveRagdoll[]): void {
     const h = this.held;
     if (h && this.carrier) {
-      const gone = !tenants.includes(this.carrier) || (h.kind === 'tenant' && !tenants.includes(h.tenant)) || !h.joint.isValid();
+      const gone = !tenants.includes(this.carrier) || (h.kind === 'tenant' && !tenants.includes(h.tenant)) || (h.joint !== null && !h.joint.isValid());
       if (gone || this.carrier.isKnockedOut) this.release(new THREE.Vector3());
     }
     for (const [r, f] of this.flying) {

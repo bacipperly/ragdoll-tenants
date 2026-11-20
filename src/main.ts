@@ -255,6 +255,28 @@ let last = performance.now();
 let physicsMsAvg = 0;
 let frameMsAvg = 16;
 
+/**
+ * Detail per tenant: off-screen ones skip the goo and face entirely; ones whose head is
+ * too small on screen to read a face get the cheap version. Uses last frame's camera.
+ */
+const HEAD_PX_FOR_FULL = 30;
+const frustum = new THREE.Frustum();
+const viewProj = new THREE.Matrix4();
+const headSphere = new THREE.Sphere();
+function setDetail(cam: THREE.Camera): void {
+  viewProj.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+  frustum.setFromProjectionMatrix(viewProj);
+  for (const t of crowd.tenants) {
+    const r = t.headSpot(headSphere.center);
+    headSphere.radius = r * 1.3; // a little slack, so a head peeking in at the edge counts
+    if (!frustum.intersectsSphere(headSphere)) { t.detail = 'hidden'; continue; }
+    const px = cam instanceof THREE.OrthographicCamera
+      ? (2 * r * cam.zoom) / (cam.top - cam.bottom) * window.innerHeight
+      : (2 * r) / (2 * headSphere.center.distanceTo(cam.position) * Math.tan(THREE.MathUtils.degToRad((cam as THREE.PerspectiveCamera).fov) / 2)) * window.innerHeight;
+    t.detail = px >= HEAD_PX_FOR_FULL ? 'full' : 'far';
+  }
+}
+
 function frame(now: number) {
   rebuildIfReshaped(now);
   const dt = (now - last) / 1000;
@@ -262,6 +284,7 @@ function frame(now: number) {
   readMoveInput(Math.min(dt, 0.1));
   crowd.update(Math.min(dt, 0.1));
 
+  setDetail(useOrtho ? ortho : persp);
   const t0 = performance.now();
   physics.step(dt);
   const physicsMs = performance.now() - t0;

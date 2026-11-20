@@ -204,6 +204,8 @@ const STAGGER_SECONDS = 0.7;
 const EDGE_PROBES = 8, PROBES_PER_STEP = 1;
 /** How long an idle blink holds the eyes shut. */
 const BLINK_SECONDS = 0.09;
+/** At 'far' detail, the face is redrawn every this many frames. */
+const FAR_FACE_EVERY = 4;
 /** How far (radians, per axis) the neck may turn to keep the head level. */
 const MAX_NECK_ANGLE = 0.7;
 const ZERO = new THREE.Vector3();
@@ -427,6 +429,14 @@ export class ActiveRagdoll {
   /** How far over it is now, along the way it faces (rad, + toward the front): where the fins aim. */
   private getUpPitch = 0;
   private readonly qLie = new THREE.Quaternion();
+  /**
+   * How much to spend on drawing this tenant, set each frame by whoever draws it:
+   * 'full'; 'far' (too small on screen to see the goo wobble or read the face: the goo
+   * rests and the face is redrawn only now and then); 'hidden' (off-screen: neither).
+   * Physics is the same at every level.
+   */
+  detail: 'full' | 'far' | 'hidden' = 'full';
+  private farFrames = 0;
   private readonly upAxis = new THREE.Vector3();
   private readonly fwdAxis = new THREE.Vector3();
   private readonly qCur = new THREE.Quaternion();
@@ -1259,8 +1269,15 @@ export class ActiveRagdoll {
       this.headAccelSum.set(0, 0, 0);
       this.headAccelSteps = 0;
     }
-    this.goo.update(dt, this.part('head').bone.quaternion, this.headAccel, this.gooContact, this.traits.squish, this.muscle * this.muscle);
-    this.face.setExpression(this.faceAwake, this.moods.letters, this.blink); // also rides it on the goo
+    if (this.detail === 'full') {
+      this.goo.update(dt, this.part('head').bone.quaternion, this.headAccel, this.gooContact, this.traits.squish, this.muscle * this.muscle);
+      this.face.setExpression(this.faceAwake, this.moods.letters, this.blink); // also rides it on the goo
+    } else if (this.detail === 'far' && ++this.farFrames >= FAR_FACE_EVERY) {
+      // Too small to see a wobble or read a face: the goo rests, and the face is redrawn
+      // now and then so blinks and moods still come through.
+      this.farFrames = 0;
+      this.face.setExpression(this.faceAwake, this.moods.letters, this.blink);
+    }
     this.jiggleButt(dt);
   }
 
@@ -1312,6 +1329,12 @@ export class ActiveRagdoll {
   }
 
   /** Belly centre as drawn this frame (between physics steps): for cameras to follow. */
+  /** Where the head is drawn (world space), and its radius: for deciding `detail`. */
+  headSpot(target: THREE.Vector3): number {
+    this.part('head').bone.getWorldPosition(target);
+    return this.dims.headR;
+  }
+
   drawnMiddle(target: THREE.Vector3): THREE.Vector3 {
     return target.copy(this.torso.bone.position);
   }

@@ -62,7 +62,7 @@ function buildSkin(bone: BoneIndex, B: BodyDims): THREE.BufferGeometry {
   const shapes: Shape[] = [];
   const size = B.bellyR / 0.089; // fillets and cells scale with the body
   shapes.push({
-    profile: B.skin.body, cx: 0, cz: 0, yOffset: 0, squashZ: 1, group: 'body', blend: 0,
+    profile: B.skin.body, cx: 0, cz: 0, yOffset: 0, squashZ: 1, group: 'body', blend: 0, region: 0,
     influence: (y) => blendAcross(belly, chest, y, B.spineY, 0.05),
   });
   for (const [side, sx] of [['L', 1], ['R', -1]] as const) {
@@ -71,7 +71,7 @@ function buildSkin(bone: BoneIndex, B: BodyDims): THREE.BufferGeometry {
     const kneeY = B.hipY - B.thighLen;
     // Legs: shin at the tip, thigh in the middle, melting into the belly at the hip.
     shapes.push({
-      profile: B.skin.leg, cx: sx * B.hipX, cz: 0, yOffset: 0, squashZ: 1, group: 'limb', blend: 0.03 * size,
+      profile: B.skin.leg, cx: sx * B.hipX, cz: 0, yOffset: 0, squashZ: 1, group: 'limb', blend: 0.03 * size, region: 1,
       root: { x: sx * B.hipX, y: B.hipY, z: 0, radius: 0.05 * size },
       influence: (y) => y > (B.hipY + kneeY) / 2
         ? blendAcross(thigh, belly, y, B.hipY, 0.03)
@@ -84,7 +84,7 @@ function buildSkin(bone: BoneIndex, B: BodyDims): THREE.BufferGeometry {
     // swung out from the shoulder so they don't melt into the belly's sides.
     shapes.push({
       profile: B.skin.arm, cx: sx * B.shoulderX, cz: 0, yOffset: B.shoulderY, squashZ: SKIN.armThickness,
-      group: 'limb', blend: 0.018 * size,
+      group: 'limb', blend: 0.018 * size, region: 2,
       swing: { px: sx * B.shoulderX, py: B.shoulderY, angle: sx * SKIN.finSplay, bones: [upper, fore] },
       root: { x: sx * B.shoulderX, y: B.shoulderY, z: 0, radius: 0.03 * size },
       influence: (y) => y > (B.shoulderY + elbowY) / 2
@@ -104,7 +104,7 @@ function buildSkin(bone: BoneIndex, B: BodyDims): THREE.BufferGeometry {
     }
     for (const sx of [1, -1]) {
       shapes.push({
-        profile: ball, cx: sx * C.x, cz: C.z, yOffset: C.y, squashZ: 0.9, group: 'limb', blend: 0.6 * R,
+        profile: ball, cx: sx * C.x, cz: C.z, yOffset: C.y, squashZ: 0.9, group: 'limb', blend: 0.6 * R, region: 3,
         influence: () => [butt, belly, 0.85, 0.15],
       });
     }

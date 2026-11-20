@@ -2,7 +2,7 @@
  * Character recipes: everything that makes one tenant look like itself, as plain data.
  *
  *   { version, name, color, mood, traits: { age, weight, fitness },
- *     proportions: { headSize, ..., lashes, blush, mouthWidth } }
+ *     proportions: { headSize, ..., lashes, blush, mouthWidth }, outfit: { shirt, pants, ... } }
  *
  * The game keeps one per tenant (save it with the tenant; it's small JSON) and passes it
  * when it creates a body. Everything else, how the body MOVES (muscles, gait, moods,
@@ -14,6 +14,7 @@
  */
 import { PROPORTIONS, TRAITS } from './config';
 import { MOOD_NAMES, type MoodName } from './mood';
+import { NO_OUTFIT, parseOutfit, randomOutfit, type Outfit } from './outfit';
 
 export type Traits = { age: number; weight: number; fitness: number };
 export type Proportions = { [K in keyof typeof PROPORTIONS]: number };
@@ -27,6 +28,8 @@ export interface Recipe {
   mood: MoodName;
   traits: Traits;
   proportions: Proportions;
+  /** What it wears (see outfit.ts). */
+  outfit: Outfit;
 }
 
 /** Sensible limits for every number in a recipe (the sandbox sliders use the same). */
@@ -44,11 +47,12 @@ const clamp = (key: string, v: number) => {
 };
 
 /** The look the sandbox's sliders are editing right now (TRAITS + PROPORTIONS), as a recipe. */
-export function recipeFromEditor(name: string, color: string, mood: MoodName): Recipe {
+export function recipeFromEditor(name: string, color: string, mood: MoodName, outfit: Outfit = NO_OUTFIT): Recipe {
   return {
     version: 1, name, color, mood,
     traits: { ...TRAITS },
     proportions: { ...PROPORTIONS },
+    outfit: structuredClone(outfit),
   };
 }
 
@@ -85,6 +89,8 @@ export function parseRecipe(data: unknown, fallback?: Recipe): Recipe | null {
     mood: typeof d.mood === 'string' && (MOOD_NAMES as string[]).includes(d.mood) ? (d.mood as MoodName) : base.mood,
     traits: nums(d.traits, base.traits),
     proportions: nums(d.proportions, base.proportions),
+    // Older recipes have no outfit: they wear nothing, as before.
+    outfit: parseOutfit(d.outfit),
   };
 }
 
@@ -143,5 +149,6 @@ export function randomRecipe(base: Recipe, rand: () => number = Math.random): Re
     mood: moods[Math.floor(r() * moods.length)],
     traits: { age: round(age), weight: round(Math.max(-1, Math.min(1, bell() * 0.7))), fitness: round(Math.max(-1, Math.min(1, bell() * 0.7))) },
     proportions,
+    outfit: randomOutfit(r),
   };
 }

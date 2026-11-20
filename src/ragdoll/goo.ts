@@ -78,6 +78,9 @@ export class GooHead {
     geo.deleteAttribute('normal');
     geo = mergeVertices(geo); // weld the seam and poles so the goo is one connected surface
     geo.computeVertexNormals();
+    // No clothes painted on the head (it shares the skin's material; see outfit.ts).
+    geo.setAttribute('clothA', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 4), 4));
+    geo.setAttribute('clothB', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 4), 4));
     const pos = geo.attributes.position as THREE.BufferAttribute;
     this.positions = pos;
     this.normals = geo.attributes.normal as THREE.BufferAttribute;

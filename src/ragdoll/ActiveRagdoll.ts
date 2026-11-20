@@ -7,6 +7,8 @@ import { bodyDims, type BodyDims } from './proportions';
 import { MoodBlender, MOOD_NAMES, type MoodName } from './mood';
 import { traitEffects, type TraitEffects } from './traits';
 import { recipeFromEditor, type Recipe } from './recipe';
+import { OutfitPainter, parseOutfit, type Outfit } from './outfit';
+import { HAT, Hat } from './hat';
 import { GesturePlayer, GESTURE_NAMES, type GestureEvent, type GestureName } from './gestures';
 
 /*
@@ -437,6 +439,8 @@ export class ActiveRagdoll {
    */
   detail: 'full' | 'far' | 'hidden' = 'full';
   private farFrames = 0;
+  private readonly painter: OutfitPainter;
+  private hat: Hat | null = null;
   private readonly upAxis = new THREE.Vector3();
   private readonly fwdAxis = new THREE.Vector3();
   private readonly qCur = new THREE.Quaternion();
@@ -473,6 +477,10 @@ export class ActiveRagdoll {
     const start = options.position ?? new THREE.Vector3();
     this.facing = options.facing ?? 0;
     this.dims = bodyDims(this.recipe.proportions, this.recipe.traits);
+    // Clothes: painted on the skin by its shader (the hat comes once the head exists).
+    this.recipe.outfit = parseOutfit(this.recipe.outfit);
+    this.painter = new OutfitPainter(this.material, this.dims);
+    this.painter.set(this.recipe.outfit);
     this.traits = traitEffects(this.recipe.traits);
     this.moods.base = this.traits.posture;
     const defs = buildParts(this.dims);
@@ -549,6 +557,7 @@ export class ActiveRagdoll {
     this.face.root.scale.setScalar(this.dims.headScale);
     this.face.pinTo(this.goo, this.dims.headScale);
     this.part('head').bone.add(this.face.root);
+    this.wearHat();
 
     // Then joints. Identity rotations at rest mean the joint frames are identity,
     // so anchors are just "joint position minus body centre" in each body's space.
@@ -631,6 +640,44 @@ export class ActiveRagdoll {
     this.material.color.set(hex);
   }
 
+  /** Wear this outfit: clothes change on the spot (a new hat replaces the old one). */
+  setOutfit(o: Outfit): void {
+    const hatBefore = JSON.stringify(this.recipe.outfit.hat);
+    this.recipe.outfit = structuredClone(o);
+    this.painter.set(o);
+    if (JSON.stringify(o.hat) === hatBefore && this.hat) return;
+    this.hat?.dispose(this.world);
+    this.hat = null;
+    this.wearHat();
+  }
+
+  private wearHat(): void {
+    const h = this.recipe.outfit.hat;
+    if (!h) return;
+    this.hat = new Hat(h.style, h.color, this.dims.headR, this.goo);
+    this.hat.putOn(this.world, this.part('head').bone);
+  }
+
+  /** Whether its hat is lying somewhere rather than on its head. */
+  get hatOff(): boolean { return this.hat?.isLoose ?? false; }
+
+  /** A knock might send the hat flying: up and off to a random side. */
+  private maybeLoseHat(): void {
+    if (!this.hat || this.hat.isLoose || Math.random() >= HAT.fallChance) return;
+    const a = Math.random() * Math.PI * 2;
+    this.tmpV.set(Math.cos(a) * 0.6, HAT.popSpeed, Math.sin(a) * 0.6);
+    this.hat.knockOff(this.world, this.group, this.collisionGroups, this.part('head').body.linvel(), this.tmpV);
+  }
+
+  /** Walking over its own hat puts it back on. */
+  private maybePickUpHat(t: RAPIER.Vector): void {
+    if (!this.hat?.canBePickedUp || this.knockedOut || this.carried || this.getUp !== 'none') return;
+    const w = this.hat.where()!;
+    if (Math.hypot(w.x - t.x, w.z - t.z) < this.dims.bellyR * HAT.pickupReach && w.y < t.y + 0.1) {
+      this.hat.putOn(this.world, this.part('head').bone);
+    }
+  }
+
   /** Wanted movement on the ground plane in world space (x east, z north), length 0..1. */
   setMoveInput(x: number, z: number, strolling = false): void {
     this.moveInput.set(x, z);
@@ -646,6 +693,7 @@ export class ActiveRagdoll {
     this.getUp = 'none';
     if (!out) this.startGetUp();
     if (out) {
+      this.maybeLoseHat();
       this.muscle = 0; // instant: a knockout is a switch, not a fade
       this.gestures.stop();
       this.heightIntegral = 0;
@@ -805,6 +853,7 @@ export class ActiveRagdoll {
   /** Teleports to a standing rest pose at `position`, facing `facing`, with everything still. */
   reset(position: THREE.Vector3, facing = this.facing): void {
     this.facing = facing;
+    if (this.hat?.isLoose) this.hat.putOn(this.world, this.part('head').bone);
     this.qTarget.setFromAxisAngle(this.axisY, facing);
     const zero = { x: 0, y: 0, z: 0 };
     for (const p of this.parts.values()) {
@@ -862,6 +911,7 @@ export class ActiveRagdoll {
    * latest step makes the body stutter against a smoothly moving camera.
    */
   rememberPose(): void {
+    this.hat?.rememberPose();
     for (const p of this.parts.values()) {
       const t = p.body.translation(), r = p.body.rotation();
       p.prevPos.set(t.x, t.y, t.z);
@@ -889,6 +939,7 @@ export class ActiveRagdoll {
     }
     // Ease-in curve: the first moments of recovery are very weak, then it firms up.
     const strength = this.muscle * this.muscle;
+    if (this.hat) this.maybePickUpHat(t);
 
     // Rapier keeps added forces until they're reset, so clear them each step. Only the
     // belly is ever given a torque, so only it needs its torques cleared.
@@ -1269,9 +1320,11 @@ export class ActiveRagdoll {
       this.headAccelSum.set(0, 0, 0);
       this.headAccelSteps = 0;
     }
+    if (this.hat?.isLoose) this.hat.sync(dt, alpha);
     if (this.detail === 'full') {
       this.goo.update(dt, this.part('head').bone.quaternion, this.headAccel, this.gooContact, this.traits.squish, this.muscle * this.muscle);
       this.face.setExpression(this.faceAwake, this.moods.letters, this.blink); // also rides it on the goo
+      if (this.hat && !this.hat.isLoose) this.hat.conform();
     } else if (this.detail === 'far' && ++this.farFrames >= FAR_FACE_EVERY) {
       // Too small to see a wobble or read a face: the goo rests, and the face is redrawn
       // now and then so blinks and moods still come through.
@@ -1382,6 +1435,7 @@ export class ActiveRagdoll {
     this.skin.skeleton.dispose();
     this.goo.dispose();
     this.face.dispose();
+    this.hat?.dispose(this.world);
     releaseSkin(this.dims);
     this.group.removeFromParent();
   }

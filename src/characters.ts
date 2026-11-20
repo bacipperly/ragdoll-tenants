@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import type GUI from 'lil-gui';
 import type { ActiveRagdoll, RagdollPhysics, Recipe } from './ragdoll';
-import { loadIntoEditor, parseRecipe, randomRecipe, recipeFromEditor } from './ragdoll';
+import { HAT_STYLES, NO_OUTFIT, TATTOO_SHAPES, TATTOO_SPOTS, loadIntoEditor, parseRecipe, randomOutfit, randomRecipe, recipeFromEditor, type HatStyle, type Outfit } from './ragdoll';
 import { GESTURE_NAMES, type GestureName } from './ragdoll/gestures';
 import { MOOD_NAMES } from './ragdoll/mood';
 import { pasteBox } from './tuner';
@@ -184,7 +184,7 @@ export function addCharactersSection(gui: GUI, crowd: Crowd, lib: Library, refre
     status: '',
   };
   const say = (t: string) => { state.status = t; statusCtrl.updateDisplay(); };
-  const current = (): Recipe => recipeFromEditor(state.name, state.color, crowd.selected.mood);
+  const current = (): Recipe => recipeFromEditor(state.name, state.color, crowd.selected.mood, crowd.selected.recipe.outfit);
   /** Rebuild the selected tenant as `recipe` and put its look in the sliders. */
   const become = (recipe: Recipe) => {
     loadIntoEditor(recipe);
@@ -267,14 +267,113 @@ export function addCharactersSection(gui: GUI, crowd: Crowd, lib: Library, refre
   folder.add(actions, 'crowdLibrary').name('👥 Add everyone in the library');
   folder.add(actions, 'clear').name('✕ Remove the others');
   const statusCtrl = folder.add(state, 'status').name('').disable();
+  const syncOutfit = addOutfitFolder(folder, crowd);
 
-  // Keep the name and colour fields in step with whoever's selected.
+  // Keep the name, colour and outfit fields in step with whoever's selected.
   const syncFromSelected = () => {
     state.name = crowd.selected.recipe.name;
     state.color = crowd.selected.recipe.color;
+    syncOutfit();
     folder.controllersRecursive().forEach((c) => c.updateDisplay());
   };
   return syncFromSelected;
+}
+
+/**
+ * The Outfit folder: each garment on or off, its colour and its shape, worn by the
+ * selected tenant on the spot (Save to library keeps it with the character).
+ */
+function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
+  const f = parent.addFolder('Outfit');
+  // Every garment's settings stay here while it's off, so switching it back on restores them.
+  const w = {
+    shirt: false, shirtColor: '#ffffff', shirtLength: 0.6, sleeves: 0.3, striped: false, stripeColor: '#2b2d42',
+    pants: false, pantsColor: '#3d5a80', rise: 0.4, legs: 0.8,
+    socks: false, socksColor: '#ffffff', socksHeight: 0.3,
+    shoes: false, shoesColor: '#333333', shoesHeight: 0.2,
+    gloves: false, glovesColor: '#ffffff', glovesLength: 0.3,
+    hat: false, hatStyle: 'beanie' as HatStyle, hatColor: '#e63946',
+    tat1: false, tat1Shape: 'heart', tat1Spot: 'finL', tat1Color: '#2b2d42', tat1Size: 0.5,
+    tat2: false, tat2Shape: 'star', tat2Spot: 'belly', tat2Color: '#2b2d42', tat2Size: 0.5,
+  };
+  const build = (): Outfit => ({
+    shirt: w.shirt ? { color: w.shirtColor, length: w.shirtLength, sleeves: w.sleeves, stripes: w.striped ? w.stripeColor : '' } : null,
+    pants: w.pants ? { color: w.pantsColor, rise: w.rise, legs: w.legs } : null,
+    socks: w.socks ? { color: w.socksColor, height: w.socksHeight } : null,
+    shoes: w.shoes ? { color: w.shoesColor, height: w.shoesHeight } : null,
+    gloves: w.gloves ? { color: w.glovesColor, length: w.glovesLength } : null,
+    hat: w.hat ? { style: w.hatStyle, color: w.hatColor } : null,
+    tattoos: [
+      ...(w.tat1 ? [{ shape: w.tat1Shape, spot: w.tat1Spot, color: w.tat1Color, size: w.tat1Size }] : []),
+      ...(w.tat2 ? [{ shape: w.tat2Shape, spot: w.tat2Spot, color: w.tat2Color, size: w.tat2Size }] : []),
+    ] as Outfit['tattoos'],
+  });
+  const apply = () => crowd.selected.setOutfit(build());
+  const sync = () => {
+    const o = crowd.selected.recipe.outfit;
+    w.shirt = !!o.shirt; if (o.shirt) { w.shirtColor = o.shirt.color; w.shirtLength = o.shirt.length; w.sleeves = o.shirt.sleeves; w.striped = !!o.shirt.stripes; if (o.shirt.stripes) w.stripeColor = o.shirt.stripes; }
+    w.pants = !!o.pants; if (o.pants) { w.pantsColor = o.pants.color; w.rise = o.pants.rise; w.legs = o.pants.legs; }
+    w.socks = !!o.socks; if (o.socks) { w.socksColor = o.socks.color; w.socksHeight = o.socks.height; }
+    w.shoes = !!o.shoes; if (o.shoes) { w.shoesColor = o.shoes.color; w.shoesHeight = o.shoes.height; }
+    w.gloves = !!o.gloves; if (o.gloves) { w.glovesColor = o.gloves.color; w.glovesLength = o.gloves.length; }
+    w.hat = !!o.hat; if (o.hat) { w.hatStyle = o.hat.style; w.hatColor = o.hat.color; }
+    const [t1, t2] = o.tattoos;
+    w.tat1 = !!t1; if (t1) { w.tat1Shape = t1.shape; w.tat1Spot = t1.spot; w.tat1Color = t1.color; w.tat1Size = t1.size; }
+    w.tat2 = !!t2; if (t2) { w.tat2Shape = t2.shape; w.tat2Spot = t2.spot; w.tat2Color = t2.color; w.tat2Size = t2.size; }
+    f.controllersRecursive().forEach((c) => c.updateDisplay());
+  };
+  const actions = {
+    random: () => { crowd.selected.setOutfit(randomOutfit()); sync(); },
+    none: () => { crowd.selected.setOutfit(structuredClone(NO_OUTFIT)); sync(); },
+  };
+  f.add(actions, 'random').name('🎲 Random outfit');
+  f.add(actions, 'none').name('Take everything off');
+  const group = (title: string, add: (g: GUI) => void) => { const g = f.addFolder(title); add(g); g.close(); };
+  group('Shirt', (g) => {
+    g.add(w, 'shirt').name('wearing one');
+    g.addColor(w, 'shirtColor').name('colour');
+    g.add(w, 'shirtLength', 0, 1, 0.01).name('length');
+    g.add(w, 'sleeves', 0, 1, 0.01).name('sleeves');
+    g.add(w, 'striped').name('striped');
+    g.addColor(w, 'stripeColor').name('stripe colour');
+  });
+  group('Pants', (g) => {
+    g.add(w, 'pants').name('wearing some');
+    g.addColor(w, 'pantsColor').name('colour');
+    g.add(w, 'rise', 0, 1, 0.01).name('waist: low ↔ high');
+    g.add(w, 'legs', 0, 1, 0.01).name('legs: briefs ↔ long');
+  });
+  group('Socks & shoes', (g) => {
+    g.add(w, 'socks').name('socks');
+    g.addColor(w, 'socksColor').name('sock colour');
+    g.add(w, 'socksHeight', 0, 1, 0.01).name('sock height');
+    g.add(w, 'shoes').name('shoes');
+    g.addColor(w, 'shoesColor').name('shoe colour');
+    g.add(w, 'shoesHeight', 0, 1, 0.01).name('shoes ↔ boots');
+  });
+  group('Gloves', (g) => {
+    g.add(w, 'gloves').name('wearing them');
+    g.addColor(w, 'glovesColor').name('colour');
+    g.add(w, 'glovesLength', 0, 1, 0.01).name('length');
+  });
+  group('Hat', (g) => {
+    g.add(w, 'hat').name('wearing one');
+    g.add(w, 'hatStyle', HAT_STYLES).name('style');
+    g.addColor(w, 'hatColor').name('colour');
+  });
+  group('Tattoos', (g) => {
+    for (const n of [1, 2] as const) {
+      g.add(w, `tat${n}`).name(`tattoo ${n}`);
+      g.add(w, `tat${n}Shape`, TATTOO_SHAPES).name('shape');
+      g.add(w, `tat${n}Spot`, TATTOO_SPOTS).name('where');
+      g.addColor(w, `tat${n}Color`).name('colour');
+      g.add(w, `tat${n}Size`, 0, 1, 0.01).name('size');
+    }
+  });
+  for (const c of f.controllersRecursive()) if (c.property in w) c.onChange(apply);
+  f.close();
+  sync();
+  return sync;
 }
 
 function spawnSpot(i: number): THREE.Vector3 {

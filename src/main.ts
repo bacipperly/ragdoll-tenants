@@ -160,7 +160,7 @@ function rebuildIfReshaped(now: number) {
   if (key !== pendingShape) { pendingShape = key; pendingSince = now; return; }
   if (now - pendingSince < 150) return;
   // The selected tenant takes the sliders' look, keeping its name, colour and mood.
-  crowd.replace(ragdoll, recipeFromEditor(ragdoll.recipe.name, ragdoll.recipe.color, ragdoll.mood));
+  crowd.replace(ragdoll, recipeFromEditor(ragdoll.recipe.name, ragdoll.recipe.color, ragdoll.mood, ragdoll.recipe.outfit));
   pendingShape = '';
 }
 

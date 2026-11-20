@@ -31,6 +31,8 @@ export interface Shape {
   squashZ: number;
   /** Which group it's in: limbs blend into 'body' with `blend`, not into each other. */
   group: 'body' | 'limb';
+  /** Which part it is, for clothes: 0 belly, 1 leg, 2 fin, 3 butt (see outfit.ts). */
+  region?: 0 | 1 | 2 | 3;
   /** Fillet size where this limb meets the body (world units). */
   blend: number;
   /** Bones by height, in the shape's own rest frame. */
@@ -299,6 +301,9 @@ export function blendedSkin(shapes: Shape[], cell: number, boneCount: number): T
   for (const f of fields) if (f.s.swing) for (const b of f.s.swing.bones) swingOf[b] = f.s.swing;
   const p = new THREE.Vector3(), n = new THREE.Vector3(), rp = new THREE.Vector3(), rn = new THREE.Vector3();
   const top = [0, 0, 0, 0], topW = [0, 0, 0, 0];
+  // For clothes: how much of each vertex is belly/leg/fin/butt, and where it is on them.
+  const clothA = new Float32Array(count * 4);
+  const clothB = new Float32Array(count * 4);
   for (let v = 0; v < count; v++) {
     p.set(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]);
     // A Newton step onto the surface (smoother than the cell average alone), then the
@@ -314,6 +319,7 @@ export function blendedSkin(shapes: Shape[], cell: number, boneCount: number): T
     // Bone weights: each shape counts by how close the point is to it (so a fillet
     // between a leg and the belly follows both), then by its own bones at that height.
     weights.fill(0);
+    let limbW = 0, bestLimbW = 0;
     let dMin = Infinity;
     for (let s = 0; s < fields.length; s++) { dist[s] = fields[s].distance(p.x, p.y, p.z); dMin = Math.min(dMin, dist[s]); }
     for (let s = 0; s < fields.length; s++) {
@@ -325,6 +331,19 @@ export function blendedSkin(shapes: Shape[], cell: number, boneCount: number): T
       const inf = f.s.influence(f.ly);
       weights[inf[0]] += w * inf[2];
       weights[inf[1]] += w * inf[3];
+      const region = f.s.region ?? 0;
+      clothA[v * 4 + region] += w;
+      if (region === 1 || region === 2) {
+        // Along the limb: 0 at its root (the top of its profile), 1 at the tip.
+        clothB[v * 4 + 1] += w * THREE.MathUtils.clamp((f.h1 - (f.ly - f.s.yOffset)) / (f.h1 - f.h0), 0, 1);
+        limbW += w;
+        if (w > bestLimbW) { bestLimbW = w; clothB[v * 4 + 3] = Math.atan2(f.lx - f.s.cx, f.lz - f.s.cz); }
+      }
+    }
+    {
+      const sum = clothA[v * 4] + clothA[v * 4 + 1] + clothA[v * 4 + 2] + clothA[v * 4 + 3] || 1;
+      for (let k = 0; k < 4; k++) clothA[v * 4 + k] /= sum;
+      if (limbW > 0) clothB[v * 4 + 1] /= limbW;
     }
     // Keep the four strongest.
     for (let t = 0; t < 4; t++) { top[t] = 0; topW[t] = 0; }
@@ -362,6 +381,8 @@ export function blendedSkin(shapes: Shape[], cell: number, boneCount: number): T
       rn.y = (n.y * ar - n.x * ai) / m;
     }
     pos[v * 3] = rp.x; pos[v * 3 + 1] = rp.y; pos[v * 3 + 2] = rp.z;
+    clothB[v * 4] = rp.y; // height on the body
+    clothB[v * 4 + 2] = Math.atan2(rp.x, rp.z); // angle round it, 0 at the front
     rn.normalize();
     normals[v * 3] = rn.x; normals[v * 3 + 1] = rn.y; normals[v * 3 + 2] = rn.z;
   }
@@ -383,6 +404,8 @@ export function blendedSkin(shapes: Shape[], cell: number, boneCount: number): T
   geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
   geo.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndex, 4));
   geo.setAttribute('skinWeight', new THREE.BufferAttribute(skinWeight, 4));
+  geo.setAttribute('clothA', new THREE.BufferAttribute(clothA, 4));
+  geo.setAttribute('clothB', new THREE.BufferAttribute(clothB, 4));
   geo.setIndex(index);
   return geo;
 }

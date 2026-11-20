@@ -236,6 +236,18 @@ export const KNOCKOUT = {
 } as const;
 
 /**
+ * Getting up after a knockout or a tumble, with the fins: on its side it rolls onto its
+ * front first; face down it does a push-up (fins planted under the chest, knees tucked);
+ * face up it sits up, pushing off behind with its fins. Then it stands.
+ */
+export const GETUP = {
+  startTilt: 0.7, // lying further over than this (rad) when it comes round: get up with the fins
+  pushSeconds: 1.2, // the push from lying to standing (× the tenant's recovery)
+  rollSeconds: 0.7, // longest it spends rolling from its side onto its front
+  effort: 0.55, // muscle strength while getting up, before the knockout has fully worn off
+};
+
+/**
  * Clumsiness: physics with consequences. At a ledge it teeters, windmilling, and then
  * either catches itself or slips off; a hard landing sometimes trips it over. Each
  * chance is per occasion, and × `amount` × the tenant's own clumsiness (from its traits:

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { BODY, BUTT, CARRY, CLUMSY, EMOTION, GAIT, GRAVITY_COMP, HOVER, JUMP, KNOCKOUT, LIMITS, MOVE, MUSCLES, UPRIGHT } from './config';
+import { BODY, BUTT, CARRY, CLUMSY, EMOTION, GAIT, GETUP, GRAVITY_COMP, HOVER, JUMP, KNOCKOUT, LIMITS, MOVE, MUSCLES, UPRIGHT } from './config';
 import { GooHead, type GooContact } from './goo';
 import { Face, acquireSkin, releaseSkin } from './skin';
 import { bodyDims, type BodyDims } from './proportions';
@@ -415,6 +415,20 @@ export class ActiveRagdoll {
   private readonly torque = { x: 0, y: 0, z: 0 };
   private readonly qTarget = new THREE.Quaternion();
   private readonly qLean = new THREE.Quaternion();
+  /** Getting up with the fins (see GETUP): rolling onto its front, pushing up, or neither. */
+  private getUp: 'none' | 'roll' | 'push' = 'none';
+  private getUpTime = 0;
+  /** 0 lying → 1 standing: how far up the push has brought the balance target. */
+  private getUpProgress = 0;
+  /** +1 face down (fins push in front), −1 face up (sits up, fins push behind). */
+  private getUpSide = 1;
+  /** How far over it was lying when the push began (rad). */
+  private getUpLie = 0;
+  /** How far over it is now, along the way it faces (rad, + toward the front): where the fins aim. */
+  private getUpPitch = 0;
+  private readonly qLie = new THREE.Quaternion();
+  private readonly upAxis = new THREE.Vector3();
+  private readonly fwdAxis = new THREE.Vector3();
   private readonly qCur = new THREE.Quaternion();
   private readonly qErr = new THREE.Quaternion();
   private readonly qHead = new THREE.Quaternion();
@@ -619,6 +633,8 @@ export class ActiveRagdoll {
     if (!out) this.tumbling = false;
     if (out === this.knockedOut) return;
     this.knockedOut = out;
+    this.getUp = 'none';
+    if (!out) this.startGetUp();
     if (out) {
       this.muscle = 0; // instant: a knockout is a switch, not a fade
       this.gestures.stop();
@@ -723,6 +739,7 @@ export class ActiveRagdoll {
     this.carryExtra = extra;
     if (on === this.carried) return;
     this.carried = on;
+    if (on) this.getUp = 'none';
     if (on) {
       this.gestures.stop();
       this.jumpPhase = 'ground';
@@ -816,6 +833,7 @@ export class ActiveRagdoll {
     this.hold = 0;
     this.faceAwake = 1;
     this.blink = 0;
+    this.getUp = 'none';
     this.surpriseTimer = this.annoyance = this.angryTimer = this.surprise = this.anger = 0;
     this.focus = this.focusHold = 0;
     this.face.setExpression(1, this.moods.letters);
@@ -883,8 +901,8 @@ export class ActiveRagdoll {
     // Energy changes how fast it chooses to walk: a tired shuffle, an excited scurry.
     const maxSpeed = (this.strolling ? MOVE.strollSpeed : MOVE.walkSpeed) * (1 + 0.25 * P.energy) * this.traits.speed
       * Math.max(0.3, 1 - CARRY.slowdown * this.loadMass / this.totalMass);
-    const wantX = this.knockedOut || this.carried ? 0 : this.moveInput.x * maxSpeed;
-    const wantZ = this.knockedOut || this.carried ? 0 : this.moveInput.y * maxSpeed;
+    const wantX = this.knockedOut || this.carried || this.getUp !== 'none' ? 0 : this.moveInput.x * maxSpeed;
+    const wantZ = this.knockedOut || this.carried || this.getUp !== 'none' ? 0 : this.moveInput.y * maxSpeed;
 
     this.updateFacing(dt);
     this.updateGait(dt, speed);
@@ -906,12 +924,18 @@ export class ActiveRagdoll {
       this.surpriseTimer = Math.max(this.surpriseTimer, 0.3);
       this.grounded = false;
       if (this.carrier) this.followCarrier();
-    } else if (strength > 0) {
-      this.applyGravityCompensation(strength);
+    } else if (strength > 0 || this.getUp !== 'none') {
+      this.updateGetUp(dt);
+      // Getting up, it puts in effort before the knockout has fully worn off; the hover
+      // only takes its weight as the push nears standing (the fins do the lifting).
+      const effort = this.getUp !== 'none' ? Math.max(strength, GETUP.effort) : strength;
+      const lift = this.getUp === 'roll' ? 0
+        : this.getUp === 'push' ? effort * THREE.MathUtils.smoothstep(this.getUpProgress, 0.35, 0.9) : strength;
+      this.applyGravityCompensation(effort);
       this.updateJump(dt);
-      this.applyHover(dt, t, strength);
+      this.applyHover(dt, t, lift);
       this.applyMove(wantX, wantZ, strength * steady * steady);
-      this.applyUpright(wantX, wantZ, speed, strength * (0.4 + 0.6 * steady));
+      this.applyUpright(wantX, wantZ, speed, effort * (0.4 + 0.6 * steady));
     }
 
     this.updateClumsy(dt);
@@ -1183,7 +1207,7 @@ export class ActiveRagdoll {
     this.anger = ease(this.anger, this.angryTimer > 0 ? 1 : 0, 6, 1.5);
     // Game face: on as it crouches to jump, kept through the air, and for a beat after
     // landing before it relaxes back into a smile.
-    if (this.jumpPhase !== 'ground') this.focusHold = 0.3;
+    if (this.jumpPhase !== 'ground' || this.getUp === 'push') this.focusHold = 0.3;
     else this.focusHold = Math.max(0, this.focusHold - dt);
     this.focus = ease(this.focus, this.focusHold > 0 ? 1 : 0, 30, 5);
 
@@ -1367,7 +1391,7 @@ export class ActiveRagdoll {
 
   /** Turn the facing target toward the move direction, at a capped rate. */
   private updateFacing(dt: number): void {
-    if (this.knockedOut || this.moveInput.lengthSq() < 0.01) return;
+    if (this.knockedOut || this.getUp !== 'none' || this.moveInput.lengthSq() < 0.01) return;
     const want = Math.atan2(this.moveInput.x, this.moveInput.y); // 0 faces +z, + toward +x
     let diff = want - this.facing;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // shortest way round
@@ -1544,6 +1568,15 @@ export class ActiveRagdoll {
     this.qTarget.multiply(this.qLean);
     this.qLean.setFromAxisAngle(this.axisZ, sway + X.bellyRoll);
     this.qTarget.multiply(this.qLean);
+    // Getting up: aim between lying (face down, or face up) and standing, rising as the
+    // push goes on. Rolling, aim face down so it turns onto its front.
+    if (this.getUp !== 'none') {
+      const roll = this.getUp === 'roll';
+      this.qLie.setFromAxisAngle(this.axisY, this.facing);
+      this.qLean.setFromAxisAngle(this.axisX, roll ? 1.35 : this.getUpSide * this.getUpLie);
+      this.qLie.multiply(this.qLean);
+      this.qTarget.copy(this.qLie.slerp(this.qTarget, roll ? 0 : THREE.MathUtils.smoothstep(this.getUpProgress, 0, 1)));
+    }
 
     const r = body.rotation();
     this.qCur.set(r.x, r.y, r.z, r.w);
@@ -1593,6 +1626,8 @@ export class ActiveRagdoll {
     // Rates of change of s and c, for the motors' velocity targets.
     const ds = c * this.gaitRate;
     const dc = -s * this.gaitRate;
+    // Getting up takes over the limbs, handing them back as it nears standing.
+    const getUp = this.getUp === 'none' ? 0 : this.getUp === 'roll' ? 1 : 1 - THREE.MathUtils.smoothstep(this.getUpProgress, 0.6, 1);
 
     for (const j of this.joints) {
       j.targetVel.set(0, 0, 0);
@@ -1699,7 +1734,91 @@ export class ActiveRagdoll {
           break;
         }
       }
+      if (getUp > 0) this.getUpPose(j, name, side, getUp);
     }
+  }
+
+  /** The torso's up and forward axes in the world. */
+  private readAxes(): void {
+    const r = this.torso.body.rotation();
+    this.tmpQ.set(r.x, r.y, r.z, r.w);
+    this.upAxis.set(0, 1, 0).applyQuaternion(this.tmpQ);
+    this.fwdAxis.set(0, 0, 1).applyQuaternion(this.tmpQ);
+  }
+
+  /** Coming round: if it's lying down, get up with the fins (on its side, roll over first). */
+  private startGetUp(): void {
+    this.readAxes();
+    if (this.carried || Math.acos(THREE.MathUtils.clamp(this.upAxis.y, -1, 1)) < GETUP.startTilt) return;
+    this.getUpTime = 0;
+    if (Math.abs(this.fwdAxis.y) < 0.4) {
+      this.getUp = 'roll';
+      this.facing = Math.atan2(this.upAxis.x, this.upAxis.z); // the way its head points
+    } else {
+      this.beginPush();
+    }
+  }
+
+  private beginPush(): void {
+    this.getUp = 'push';
+    this.getUpTime = 0;
+    this.getUpProgress = 0;
+    // Face down it pushes up toward where its head points; face up it sits up toward its feet.
+    this.getUpSide = this.fwdAxis.y < 0 ? 1 : -1;
+    this.facing = Math.atan2(this.getUpSide * this.upAxis.x, this.getUpSide * this.upAxis.z);
+    this.getUpLie = Math.acos(THREE.MathUtils.clamp(this.upAxis.y, -1, 1));
+  }
+
+  /** Moves the get-up along: the roll until it's on its front, the push until it stands. */
+  private updateGetUp(dt: number): void {
+    if (this.getUp === 'none') return;
+    this.getUpTime += dt;
+    this.readAxes();
+    const fx = Math.sin(this.facing), fz = Math.cos(this.facing);
+    this.getUpPitch = Math.atan2(this.upAxis.x * fx + this.upAxis.z * fz, this.upAxis.y);
+    if (this.getUp === 'roll') {
+      if (Math.hypot(this.upAxis.x, this.upAxis.z) > 0.3) this.facing = Math.atan2(this.upAxis.x, this.upAxis.z);
+      if (this.fwdAxis.y < -0.4 || this.getUpTime > GETUP.rollSeconds) this.beginPush();
+      return;
+    }
+    // The target rises steadily, but waits for the body if it's fallen well behind.
+    const target = this.getUpSide * this.getUpLie * (1 - THREE.MathUtils.smoothstep(this.getUpProgress, 0, 1));
+    const rate = Math.abs(this.getUpPitch - target) > 0.6 ? 0.3 : 1;
+    this.getUpProgress += (dt * rate) / (GETUP.pushSeconds * this.traits.recover);
+    if (this.getUpProgress >= 1) this.getUp = 'none';
+  }
+
+  /**
+   * The getting-up pose, blended over the usual one by `w`: fins reach for the floor
+   * (straight down in the world, a little ahead of the shoulders, so they plant and push),
+   * knees tucked under to stand on.
+   */
+  private getUpPose(j: Joint, name: string, side: number, w: number): void {
+    const lerp = THREE.MathUtils.lerp;
+    switch (name) {
+      case 'upperArmL':
+      case 'upperArmR': {
+        const reach = THREE.MathUtils.clamp(this.getUpPitch + 0.3 * this.getUpSide, -2, 2.4);
+        j.target.x = lerp(j.target.x, -reach, w);
+        j.target.z = lerp(j.target.z, side * (GAIT.armOut + 0.3), w);
+        break;
+      }
+      case 'forearmL':
+      case 'forearmR':
+        j.target.x = lerp(j.target.x, -0.25, w);
+        break;
+      case 'thighL':
+      case 'thighR':
+        j.target.x = lerp(j.target.x, -1.1, w);
+        break;
+      case 'shinL':
+      case 'shinR':
+        j.target.x = lerp(j.target.x, 1.5, w);
+        break;
+      default:
+        return;
+    }
+    j.targetVel.multiplyScalar(1 - w);
   }
 
   /** How much the legs bend for the take-off crouch and the landing squash, 0..1. */
@@ -1710,7 +1829,7 @@ export class ActiveRagdoll {
 
   /** Push the targets and the current muscle strength into Rapier's joint motors. */
   private applyMotors(): void {
-    const strength = this.muscle * this.muscle;
+    const strength = Math.max(this.muscle * this.muscle, this.getUp !== 'none' ? GETUP.effort : 0);
     // Tension letter: tight muscles snap to the pose faster, loose ones lag and flop.
     const tension = Math.max(0.3, 1 + 0.35 * this.moods.letters.tension);
     for (const j of this.joints) {

@@ -8,7 +8,7 @@ export type { ActiveRagdollOptions } from './ActiveRagdoll';
 export { RAPIER };
 export type { Recipe } from './recipe';
 export { parseRecipe, randomRecipe, recipeFromEditor, loadIntoEditor, sameLook } from './recipe';
-export { HAT_STYLES, TATTOO_SHAPES, TATTOO_SPOTS, NO_OUTFIT, randomOutfit, type HatStyle, type Outfit } from './outfit';
+export { HAT_STYLES, SHIRT_PATTERNS, TATTOO_SHAPES, TATTOO_SPOTS, NO_OUTFIT, randomOutfit, type HatStyle, type Outfit, type ShirtPattern } from './outfit';
 export { HAT } from './hat';
 
 /** Fixed physics step. Small bodies at this scale need a short step to stay stable. */

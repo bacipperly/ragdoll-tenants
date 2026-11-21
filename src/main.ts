@@ -62,11 +62,11 @@ function makeOrbit(camera: THREE.Camera): OrbitControls {
   return c;
 }
 const perspOrbit = makeOrbit(persp);
-perspOrbit.minDistance = 0.8;
-perspOrbit.maxDistance = 10;
+perspOrbit.minDistance = 0.35;
+perspOrbit.maxDistance = 18;
 const orthoOrbit = makeOrbit(ortho);
-orthoOrbit.minZoom = 0.4;
-orthoOrbit.maxZoom = 4;
+orthoOrbit.minZoom = 0.25;
+orthoOrbit.maxZoom = 10;
 perspOrbit.enabled = !useOrtho;
 orthoOrbit.enabled = useOrtho;
 

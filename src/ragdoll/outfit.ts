@@ -17,6 +17,12 @@ import type { BodyDims } from './proportions';
 
 export type HatStyle = 'beanie' | 'cap' | 'tophat';
 export const HAT_STYLES: HatStyle[] = ['beanie', 'cap', 'tophat'];
+export type ShirtPattern = 'plain' | 'stripes' | 'pinstripes' | 'dots' | 'gingham' | 'zigzag' | 'hearts' | 'stars';
+export const SHIRT_PATTERNS: ShirtPattern[] = ['plain', 'stripes', 'pinstripes', 'dots', 'gingham', 'zigzag', 'hearts', 'stars'];
+/** How big one repeat of each pattern is (world units). */
+const PATTERN_CELL: Record<ShirtPattern, number> = {
+  plain: 0.028, stripes: 0.028, pinstripes: 0.022, dots: 0.03, gingham: 0.03, zigzag: 0.03, hearts: 0.038, stars: 0.038,
+};
 export type TattooShape = 'heart' | 'star' | 'ring';
 export const TATTOO_SHAPES: TattooShape[] = ['heart', 'star', 'ring'];
 /** Where a tattoo goes. L/R are the tenant's own left and right. */
@@ -24,8 +30,8 @@ export type TattooSpot = 'belly' | 'back' | 'finL' | 'finR' | 'legL' | 'legR';
 export const TATTOO_SPOTS: TattooSpot[] = ['belly', 'back', 'finL', 'finR', 'legL', 'legR'];
 
 export interface Outfit {
-  /** length: 0 a crop top … 1 down over the hips. sleeves: 0 none … 1 to the fin tips. stripes: '' for plain. */
-  shirt: { color: string; length: number; sleeves: number; stripes: string } | null;
+  /** length: 0 a crop top … 1 down over the hips. sleeves: 0 none … 1 to the fin tips. patternColor: the pattern's second colour. */
+  shirt: { color: string; length: number; sleeves: number; pattern: ShirtPattern; patternColor: string } | null;
   /** rise: 0 low on the hips … 1 high-waisted. legs: 0 briefs … 1 to the ankles. */
   pants: { color: string; rise: number; legs: number } | null;
   /** height: 0 ankle socks … 1 knee-high. */
@@ -58,7 +64,10 @@ export function parseOutfit(data: unknown): Outfit {
   return {
     shirt: s && {
       color: col(s.color, '#ffffff'), length: num(s.length, 0.6), sleeves: num(s.sleeves, 0.3),
-      stripes: typeof s.stripes === 'string' && HEX.test(s.stripes) ? s.stripes.toLowerCase() : '',
+      // Older recipes had stripes: colour ('' for plain).
+      ...(typeof s.stripes === 'string' && HEX.test(s.stripes) && s.pattern === undefined
+        ? { pattern: 'stripes' as const, patternColor: s.stripes.toLowerCase() }
+        : { pattern: pick(s.pattern, SHIRT_PATTERNS, 'plain'), patternColor: col(s.patternColor, '#2b2d42') }),
     },
     pants: p && { color: col(p.color, '#3d5a80'), rise: num(p.rise, 0.4), legs: num(p.legs, 0.8) },
     socks: so && { color: col(so.color, '#ffffff'), height: num(so.height, 0.3) },
@@ -94,7 +103,7 @@ export function randomOutfit(rand: () => number = Math.random): Outfit {
     }
   }
   return {
-    shirt: r() < 0.7 ? { color: c(), length: between(0.3, 0.9), sleeves: r() < 0.5 ? 0 : between(0.25, 1), stripes: r() < 0.25 ? c() : '' } : null,
+    shirt: r() < 0.7 ? { color: c(), length: between(0.3, 0.9), sleeves: r() < 0.5 ? 0 : between(0.25, 1), pattern: r() < 0.4 ? SHIRT_PATTERNS[1 + Math.floor(r() * (SHIRT_PATTERNS.length - 1))] : 'plain', patternColor: c() } : null,
     pants: r() < 0.65 ? { color: c(), rise: between(0.1, 0.7), legs: r() < 0.3 ? 0 : between(0.3, 1) } : null,
     socks: r() < 0.3 ? { color: c(), height: between(0, 1) } : null,
     shoes: r() < 0.5 ? { color: c(), height: between(0, 0.6) } : null,
@@ -114,7 +123,8 @@ const SPOT = { belly: [1, 0], back: [1, 0], finL: [3, 1], finR: [3, -1], legL: [
  */
 export class OutfitPainter {
   private readonly u = {
-    uShirt: { value: new THREE.Vector4() }, // on, bottom y, sleeve t, stripe period (0 = plain)
+    uShirt: { value: new THREE.Vector4() }, // on, bottom y, sleeve t, pattern (index in SHIRT_PATTERNS; 0 plain)
+    uPattern: { value: new THREE.Vector4() }, // repeats round the body, repeats round a fin, repeat size
     uShirtTop: { value: 0 },
     uShirtColor: { value: new THREE.Color() },
     uStripeColor: { value: new THREE.Color() },
@@ -155,7 +165,7 @@ export class OutfitPainter {
         .replace('#include <color_fragment>', `#include <color_fragment>\n${FRAGMENT_PAINT}`);
     };
     // All tenants share one compiled shader; only their uniforms differ.
-    material.customProgramCacheKey = () => 'tenant-outfit-1';
+    material.customProgramCacheKey = () => 'tenant-outfit-2';
   }
 
   /** Wear this outfit (live: the next frame shows it). */
@@ -165,9 +175,13 @@ export class OutfitPainter {
     if (o.shirt) {
       // Bottom: from a crop top just under the chest to down over the hips.
       const bottom = lerp(D.spineY + 0.35 * (D.shoulderY - D.spineY), D.hipY - 0.03, o.shirt.length);
-      U.uShirt.value.set(1, bottom, o.shirt.sleeves * 0.97, o.shirt.stripes ? 1 / 0.028 : 0);
+      U.uShirt.value.set(1, bottom, o.shirt.sleeves * 0.97, SHIRT_PATTERNS.indexOf(o.shirt.pattern));
+      // A whole number of repeats round the body and the fins, so there's no seam at the back.
+      const cell = PATTERN_CELL[o.shirt.pattern];
+      const round = (r: number) => Math.max(3, Math.round((2 * Math.PI * r) / cell));
+      U.uPattern.value.set(round(D.bellyR), round(U.uSizes.value.z), cell, 0);
       U.uShirtColor.value.set(o.shirt.color);
-      U.uStripeColor.value.set(o.shirt.stripes || o.shirt.color);
+      U.uStripeColor.value.set(o.shirt.patternColor);
     } else U.uShirt.value.set(0, 0, 0, 0);
     if (o.pants) {
       U.uPants.value.set(1, lerp(D.hipY + 0.01, D.spineY + 0.01, o.pants.rise), o.pants.legs < 0.02 ? -1 : lerp(0.12, 0.9, o.pants.legs), 0);
@@ -210,7 +224,7 @@ const FRAGMENT_DECL = /* glsl */ `
 varying vec4 vClothA; // how much of this point is belly, leg, fin, butt
 varying vec4 vClothB; // height on the body, fraction along a limb (0 root … 1 tip), angle round the body, angle round the limb
 varying vec3 vRest;   // rest-pose position: its x says which side a limb is on
-uniform vec4 uShirt; uniform float uShirtTop; uniform vec3 uShirtColor; uniform vec3 uStripeColor;
+uniform vec4 uShirt; uniform vec4 uPattern; uniform float uShirtTop; uniform vec3 uShirtColor; uniform vec3 uStripeColor;
 uniform vec4 uPants; uniform vec3 uPantsColor;
 uniform vec4 uSocks; uniform vec3 uSocksColor;
 uniform vec4 uShoes; uniform vec3 uShoesColor;
@@ -256,7 +270,7 @@ const FRAGMENT_PAINT = /* glsl */ `
     if (A.x < 0.5) continue;
     vec2 p; float w;
     if (A.x < 1.5) { // on the body: round it by angle, up it by height
-      p = vec2(wrapAngle(vClothB.z - A.w) * uSizes.x, y - A.z);
+      p = vec2(wrapAngle(atan(vRest.x, vRest.z) - A.w) * uSizes.x, y - A.z);
       w = body;
     } else { // on a limb: round it, and along it (up toward the root)
       float r = A.x < 2.5 ? uSizes.y : uSizes.z, len = A.x < 2.5 ? uLengths.x : uLengths.y;
@@ -282,9 +296,34 @@ const FRAGMENT_PAINT = /* glsl */ `
     float onFin = fin * (1.0 - above(t, uShirt.z));
     float m = max(onBody, onFin);
     vec3 c = uShirtColor;
-    if (uShirt.w > 0.0) {
-      float along = onFin > onBody ? t * uLengths.y : y;
-      c = mix(c, uStripeColor, above(fract(along * uShirt.w), 0.5));
+    if (uShirt.w > 0.5) {
+      // Pattern coordinates in repeats: round (a whole number of them) and up.
+      bool onF = onFin > onBody;
+      // The body's angle comes from the rest position, per pixel: an angle passed from the
+      // vertices would sweep the whole way round on the triangles across the back.
+      float a = onF ? wrapAngle(vClothB.w * side) : atan(vRest.x, vRest.z), n = onF ? uPattern.y : uPattern.x;
+      vec2 q = vec2(a / (2.0 * PI) * n, (onF ? -t * uLengths.y : y) / uPattern.z);
+      // One pixel, in repeats (from the rest position, which has no jump anywhere).
+      float aa = 0.75 * length(fwidth(vRest)) / uPattern.z + 1e-4;
+      int P = int(uShirt.w + 0.5);
+      // Rows of spots and motifs are staggered by half a repeat.
+      vec2 f = fract(vec2(q.x + 0.5 * mod(floor(q.y), 2.0), q.y)) - 0.5;
+      // d: distance to the pattern's edge in repeats (negative inside).
+      float d;
+      if (P == 1) d = abs(fract(q.y) - 0.5) - 0.25;                                   // stripes
+      else if (P == 2) d = abs(fract(q.x) - 0.5) - 0.07;                               // pinstripes
+      else if (P == 3) d = length(f) - 0.24;                                           // dots
+      else if (P == 4) d = 0.0;                                                        // gingham (below)
+      else if (P == 5) d = abs(fract(q.y + 1.2 * abs(fract(q.x) - 0.5)) - 0.5) - 0.2; // zigzag
+      else if (P == 6) d = sdHeart(f / 0.42) * 0.42;                                   // hearts
+      else d = sdStar(f / 0.42) * 0.42;                                                // stars
+      float k = 1.0 - smoothstep(-aa, aa, d);
+      if (P == 4) { // two crossing bands: half where one crosses, full where both do
+        float bx = 1.0 - smoothstep(-aa, aa, abs(fract(q.x) - 0.5) - 0.25);
+        float by = 1.0 - smoothstep(-aa, aa, abs(fract(q.y) - 0.5) - 0.25);
+        k = 0.5 * (bx + by);
+      }
+      c = mix(c, uStripeColor, k);
     }
     float hem = max(body * (1.0 - above(y, uShirt.y + 0.006)), fin * above(t, uShirt.z - 0.04)) * 0.15;
     col = mix(col, c * (1.0 - hem), m);

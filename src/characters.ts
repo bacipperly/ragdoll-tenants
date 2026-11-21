@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import type GUI from 'lil-gui';
 import type { ActiveRagdoll, RagdollPhysics, Recipe } from './ragdoll';
-import { HAT_STYLES, NO_OUTFIT, TATTOO_SHAPES, TATTOO_SPOTS, loadIntoEditor, parseRecipe, randomOutfit, randomRecipe, recipeFromEditor, type HatStyle, type Outfit } from './ragdoll';
+import { HAT_STYLES, SHIRT_PATTERNS, NO_OUTFIT, TATTOO_SHAPES, TATTOO_SPOTS, loadIntoEditor, parseRecipe, randomOutfit, randomRecipe, recipeFromEditor, type HatStyle, type Outfit, type ShirtPattern } from './ragdoll';
 import { GESTURE_NAMES, type GestureName } from './ragdoll/gestures';
 import { MOOD_NAMES } from './ragdoll/mood';
 import { pasteBox } from './tuner';
@@ -287,7 +287,7 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
   const f = parent.addFolder('Outfit');
   // Every garment's settings stay here while it's off, so switching it back on restores them.
   const w = {
-    shirt: false, shirtColor: '#ffffff', shirtLength: 0.6, sleeves: 0.3, striped: false, stripeColor: '#2b2d42',
+    shirt: false, shirtColor: '#ffffff', shirtLength: 0.6, sleeves: 0.3, pattern: 'plain' as ShirtPattern, patternColor: '#2b2d42',
     pants: false, pantsColor: '#3d5a80', rise: 0.4, legs: 0.8,
     socks: false, socksColor: '#ffffff', socksHeight: 0.3,
     shoes: false, shoesColor: '#333333', shoesHeight: 0.2,
@@ -297,7 +297,7 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
     tat2: false, tat2Shape: 'star', tat2Spot: 'belly', tat2Color: '#2b2d42', tat2Size: 0.5,
   };
   const build = (): Outfit => ({
-    shirt: w.shirt ? { color: w.shirtColor, length: w.shirtLength, sleeves: w.sleeves, stripes: w.striped ? w.stripeColor : '' } : null,
+    shirt: w.shirt ? { color: w.shirtColor, length: w.shirtLength, sleeves: w.sleeves, pattern: w.pattern, patternColor: w.patternColor } : null,
     pants: w.pants ? { color: w.pantsColor, rise: w.rise, legs: w.legs } : null,
     socks: w.socks ? { color: w.socksColor, height: w.socksHeight } : null,
     shoes: w.shoes ? { color: w.shoesColor, height: w.shoesHeight } : null,
@@ -311,7 +311,7 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
   const apply = () => crowd.selected.setOutfit(build());
   const sync = () => {
     const o = crowd.selected.recipe.outfit;
-    w.shirt = !!o.shirt; if (o.shirt) { w.shirtColor = o.shirt.color; w.shirtLength = o.shirt.length; w.sleeves = o.shirt.sleeves; w.striped = !!o.shirt.stripes; if (o.shirt.stripes) w.stripeColor = o.shirt.stripes; }
+    w.shirt = !!o.shirt; if (o.shirt) { w.shirtColor = o.shirt.color; w.shirtLength = o.shirt.length; w.sleeves = o.shirt.sleeves; w.pattern = o.shirt.pattern; w.patternColor = o.shirt.patternColor; }
     w.pants = !!o.pants; if (o.pants) { w.pantsColor = o.pants.color; w.rise = o.pants.rise; w.legs = o.pants.legs; }
     w.socks = !!o.socks; if (o.socks) { w.socksColor = o.socks.color; w.socksHeight = o.socks.height; }
     w.shoes = !!o.shoes; if (o.shoes) { w.shoesColor = o.shoes.color; w.shoesHeight = o.shoes.height; }
@@ -334,8 +334,12 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
     g.addColor(w, 'shirtColor').name('colour');
     g.add(w, 'shirtLength', 0, 1, 0.01).name('length');
     g.add(w, 'sleeves', 0, 1, 0.01).name('sleeves');
-    g.add(w, 'striped').name('striped');
-    g.addColor(w, 'stripeColor').name('stripe colour');
+    const names: Record<ShirtPattern, string> = {
+      plain: 'Plain', stripes: 'Stripes', pinstripes: 'Pinstripes', dots: 'Polka dots',
+      gingham: 'Gingham', zigzag: 'Zigzag', hearts: 'Hearts', stars: 'Stars',
+    };
+    g.add(w, 'pattern', Object.fromEntries(SHIRT_PATTERNS.map((p) => [names[p], p]))).name('pattern');
+    g.addColor(w, 'patternColor').name('pattern colour');
   });
   group('Pants', (g) => {
     g.add(w, 'pants').name('wearing some');

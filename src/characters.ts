@@ -288,6 +288,8 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
   // Every garment's settings stay here while it's off, so switching it back on restores them.
   const w = {
     shirt: false, shirtColor: '#ffffff', shirtLength: 0.6, sleeves: 0.3, pattern: 'plain' as ShirtPattern, patternColor: '#2b2d42',
+    hoodie: false, hoodieColor: '#8d99ae', hoodUp: false, pocket: true,
+    skirt: false, skirtColor: '#e63946', skirtLength: 0.4, flare: 0.5, pleats: false,
     pants: false, pantsColor: '#3d5a80', rise: 0.4, legs: 0.8,
     socks: false, socksColor: '#ffffff', socksHeight: 0.3,
     shoes: false, shoesColor: '#333333', shoesHeight: 0.2,
@@ -298,6 +300,8 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
   };
   const build = (): Outfit => ({
     shirt: w.shirt ? { color: w.shirtColor, length: w.shirtLength, sleeves: w.sleeves, pattern: w.pattern, patternColor: w.patternColor } : null,
+    hoodie: w.hoodie ? { color: w.hoodieColor, hoodUp: w.hoodUp, pocket: w.pocket } : null,
+    skirt: w.skirt ? { color: w.skirtColor, length: w.skirtLength, flare: w.flare, pleats: w.pleats } : null,
     pants: w.pants ? { color: w.pantsColor, rise: w.rise, legs: w.legs } : null,
     socks: w.socks ? { color: w.socksColor, height: w.socksHeight } : null,
     shoes: w.shoes ? { color: w.shoesColor, height: w.shoesHeight } : null,
@@ -312,6 +316,8 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
   const sync = () => {
     const o = crowd.selected.recipe.outfit;
     w.shirt = !!o.shirt; if (o.shirt) { w.shirtColor = o.shirt.color; w.shirtLength = o.shirt.length; w.sleeves = o.shirt.sleeves; w.pattern = o.shirt.pattern; w.patternColor = o.shirt.patternColor; }
+    w.hoodie = !!o.hoodie; if (o.hoodie) { w.hoodieColor = o.hoodie.color; w.hoodUp = o.hoodie.hoodUp; w.pocket = o.hoodie.pocket; }
+    w.skirt = !!o.skirt; if (o.skirt) { w.skirtColor = o.skirt.color; w.skirtLength = o.skirt.length; w.flare = o.skirt.flare; w.pleats = o.skirt.pleats; }
     w.pants = !!o.pants; if (o.pants) { w.pantsColor = o.pants.color; w.rise = o.pants.rise; w.legs = o.pants.legs; }
     w.socks = !!o.socks; if (o.socks) { w.socksColor = o.socks.color; w.socksHeight = o.socks.height; }
     w.shoes = !!o.shoes; if (o.shoes) { w.shoesColor = o.shoes.color; w.shoesHeight = o.shoes.height; }
@@ -340,6 +346,19 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
     };
     g.add(w, 'pattern', Object.fromEntries(SHIRT_PATTERNS.map((p) => [names[p], p]))).name('pattern');
     g.addColor(w, 'patternColor').name('pattern colour');
+  });
+  group('Hoodie', (g) => {
+    g.add(w, 'hoodie').name('wearing one');
+    g.addColor(w, 'hoodieColor').name('colour');
+    g.add(w, 'hoodUp').name('hood up');
+    g.add(w, 'pocket').name('front pocket');
+  });
+  group('Skirt', (g) => {
+    g.add(w, 'skirt').name('wearing one');
+    g.addColor(w, 'skirtColor').name('colour');
+    g.add(w, 'skirtLength', 0, 1, 0.01).name('length: mini ↔ knee');
+    g.add(w, 'flare', 0, 1, 0.01).name('flare');
+    g.add(w, 'pleats').name('pleated');
   });
   group('Pants', (g) => {
     g.add(w, 'pants').name('wearing some');

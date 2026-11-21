@@ -37,13 +37,39 @@ export class Hat {
   private readonly tmpQ = new THREE.Quaternion();
   private readonly v = new THREE.Vector3();
 
-  constructor(readonly style: HatStyle, color: string, private readonly R: number, private readonly goo: GooHead) {
+  constructor(readonly style: HatStyle | 'hood', color: string, private readonly R: number, private readonly goo: GooHead) {
     this.material = new THREE.MeshStandardMaterial({ color, roughness: style === 'tophat' ? 0.45 : 0.85 });
     // Trim: a cuff, a band or a button, a little darker (a top hat's band is dark).
     this.trim = new THREE.MeshStandardMaterial({ color: style === 'tophat' ? '#1b1b2f' : color, roughness: 0.8 });
     if (style !== 'tophat') this.trim.color.multiplyScalar(0.82);
     const r = R;
-    if (style === 'beanie') {
+    if (style === 'hood') {
+      // A hoodie's hood, up: a loose shell round the back and sides of the head, open at
+      // the face, pulled a little forward. Seen from inside through the opening.
+      this.material.side = THREE.DoubleSide;
+      // A shell down past the jaw with a round hole cut out for the face (a cone round
+      // `face`, slightly below level, the way a hood frames the face).
+      const R1 = r * 1.2, cone = 0.8;
+      const face = new THREE.Vector3(0, -0.14, 1).normalize();
+      const shell = new THREE.SphereGeometry(R1, 34, 18, 0, Math.PI * 2, 0, 2.45).toNonIndexed();
+      const src = shell.attributes.position.array as Float32Array;
+      const kept: number[] = [];
+      const c = new THREE.Vector3();
+      for (let i = 0; i < src.length; i += 9) {
+        c.set(src[i] + src[i + 3] + src[i + 6], src[i + 1] + src[i + 4] + src[i + 7], src[i + 2] + src[i + 5] + src[i + 8]).normalize();
+        if (c.angleTo(face) > cone) for (let k = 0; k < 9; k++) kept.push(src[i + k]);
+      }
+      shell.dispose();
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(kept, 3));
+      geo.computeVertexNormals();
+      this.hug(geo, this.material, 0);
+      // A rolled edge right round the opening.
+      this.trim.color.set(color).multiplyScalar(0.9);
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(R1 * Math.sin(cone) * 0.99, r * 0.045, 6, 32), this.trim);
+      rim.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), face);
+      this.ride(rim, this.v.copy(face).multiplyScalar(R1 * Math.cos(cone)));
+    } else if (style === 'beanie') {
       // A dome pulled down to the brows, a rolled cuff round its edge, a pompom on top.
       this.hug(new THREE.SphereGeometry(r * 1.07, 26, 10, 0, Math.PI * 2, 0, 0.98), this.material, -0.12);
       this.hug(new THREE.SphereGeometry(r * 1.1, 26, 3, 0, Math.PI * 2, 0.74, 0.27), this.trim, -0.12);

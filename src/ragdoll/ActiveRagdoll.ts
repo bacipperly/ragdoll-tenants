@@ -9,6 +9,7 @@ import { traitEffects, type TraitEffects } from './traits';
 import { recipeFromEditor, type Recipe } from './recipe';
 import { OutfitPainter, parseOutfit, type Outfit } from './outfit';
 import { HAT, Hat } from './hat';
+import { Skirt, hoodDown, disposeMesh, type LegBones } from './garments';
 import { GesturePlayer, GESTURE_NAMES, type GestureEvent, type GestureName } from './gestures';
 
 /*
@@ -451,6 +452,10 @@ export class ActiveRagdoll {
   private farFrames = 0;
   private readonly painter: OutfitPainter;
   private hat: Hat | null = null;
+  /** A skirt, and a hoodie's hood lying on the back (meshes; see garments.ts). */
+  private skirt: Skirt | null = null;
+  private hood: THREE.Mesh | null = null;
+  private legBones: LegBones[] = [];
   private readonly upAxis = new THREE.Vector3();
   private readonly fwdAxis = new THREE.Vector3();
   private readonly qCur = new THREE.Quaternion();
@@ -568,6 +573,11 @@ export class ActiveRagdoll {
     this.face.pinTo(this.goo, this.dims.headScale);
     this.part('head').bone.add(this.face.root);
     this.wearHat();
+    this.legBones = [
+      { thigh: this.part('thighL').bone, shin: this.part('shinL').bone },
+      { thigh: this.part('thighR').bone, shin: this.part('shinR').bone },
+    ];
+    this.wearGarments();
 
     // Then joints. Identity rotations at rest mean the joint frames are identity,
     // so anchors are just "joint position minus body centre" in each body's space.
@@ -652,20 +662,45 @@ export class ActiveRagdoll {
 
   /** Wear this outfit: clothes change on the spot (a new hat replaces the old one). */
   setOutfit(o: Outfit): void {
-    const hatBefore = JSON.stringify(this.recipe.outfit.hat);
+    const before = this.recipe.outfit;
+    const hatBefore = JSON.stringify(this.headwear(before));
+    const meshesBefore = JSON.stringify([before.skirt, before.hoodie]);
     this.recipe.outfit = structuredClone(o);
     this.painter.set(o);
-    if (JSON.stringify(o.hat) === hatBefore && this.hat) return;
+    if (JSON.stringify([o.skirt, o.hoodie]) !== meshesBefore) this.wearGarments();
+    if (JSON.stringify(this.headwear(o)) === hatBefore && (this.hat || !this.headwear(o))) return;
     this.hat?.dispose(this.world);
     this.hat = null;
     this.wearHat();
   }
 
+  /** What's on its head: a hoodie's hood when it's up (instead of any hat), else the hat. */
+  private headwear(o: Outfit): { style: Hat['style']; color: string } | null {
+    return o.hoodie?.hoodUp ? { style: 'hood', color: o.hoodie.color } : o.hat;
+  }
+
   private wearHat(): void {
-    const h = this.recipe.outfit.hat;
+    const h = this.headwear(this.recipe.outfit);
     if (!h) return;
     this.hat = new Hat(h.style, h.color, this.dims.headR, this.goo);
     this.hat.putOn(this.world, this.part('head').bone);
+  }
+
+  /** The skirt and a hood that's down: (re)built from the outfit. */
+  private wearGarments(): void {
+    this.skirt?.dispose();
+    this.skirt = null;
+    disposeMesh(this.hood);
+    this.hood = null;
+    const o = this.recipe.outfit, D = this.dims;
+    if (o.skirt) {
+      this.skirt = new Skirt(o.skirt, D, D.bellyY);
+      this.part('torso').bone.add(this.skirt.mesh);
+    }
+    if (o.hoodie && !o.hoodie.hoodUp) {
+      this.hood = hoodDown(o.hoodie.color, D, D.spineY + D.chestLen / 2);
+      this.part('chest').bone.add(this.hood);
+    }
   }
 
   /** Whether its hat is lying somewhere rather than on its head. */
@@ -673,7 +708,7 @@ export class ActiveRagdoll {
 
   /** A knock might send the hat flying: up and off to a random side. */
   private maybeLoseHat(): void {
-    if (!this.hat || this.hat.isLoose || Math.random() >= HAT.fallChance) return;
+    if (!this.hat || this.hat.isLoose || this.hat.style === 'hood' || Math.random() >= HAT.fallChance) return;
     const a = Math.random() * Math.PI * 2;
     this.tmpV.set(Math.cos(a) * 0.6, HAT.popSpeed, Math.sin(a) * 0.6);
     this.hat.knockOff(this.world, this.group, this.collisionGroups, this.part('head').body.linvel(), this.tmpV);
@@ -1337,6 +1372,7 @@ export class ActiveRagdoll {
       this.goo.update(dt, this.part('head').bone.quaternion, this.headAccel, this.gooContact, this.traits.squish, this.muscle * this.muscle);
       this.face.setExpression(this.faceAwake, this.moods.letters, Math.max(this.blink, this.gestures.extras.eyesShut)); // also rides it on the goo
       if (this.hat && !this.hat.isLoose) this.hat.conform();
+      this.skirt?.update(dt, this.torso.bone, this.legBones);
     } else if (this.detail === 'far' && ++this.farFrames >= FAR_FACE_EVERY) {
       // Too small to see a wobble or read a face: the goo rests, and the face is redrawn
       // now and then so blinks and moods still come through.
@@ -1448,6 +1484,8 @@ export class ActiveRagdoll {
     this.goo.dispose();
     this.face.dispose();
     this.hat?.dispose(this.world);
+    this.skirt?.dispose();
+    disposeMesh(this.hood);
     releaseSkin(this.dims);
     this.group.removeFromParent();
   }

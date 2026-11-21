@@ -32,6 +32,10 @@ export const TATTOO_SPOTS: TattooSpot[] = ['belly', 'back', 'finL', 'finR', 'leg
 export interface Outfit {
   /** length: 0 a crop top … 1 down over the hips. sleeves: 0 none … 1 to the fin tips. patternColor: the pattern's second colour. */
   shirt: { color: string; length: number; sleeves: number; pattern: ShirtPattern; patternColor: string } | null;
+  /** Worn over any shirt: long sleeves, a hood (up over the head, or down on the back), a front pocket. */
+  hoodie: { color: string; hoodUp: boolean; pocket: boolean } | null;
+  /** A real skirt round the hips. length: 0 mini … 1 to the knees. flare: 0 straight … 1 very full. */
+  skirt: { color: string; length: number; flare: number; pleats: boolean } | null;
   /** rise: 0 low on the hips … 1 high-waisted. legs: 0 briefs … 1 to the ankles. */
   pants: { color: string; rise: number; legs: number } | null;
   /** height: 0 ankle socks … 1 knee-high. */
@@ -45,7 +49,7 @@ export interface Outfit {
   tattoos: { shape: TattooShape; spot: TattooSpot; color: string; size: number }[];
 }
 
-export const NO_OUTFIT: Outfit = { shirt: null, pants: null, socks: null, shoes: null, gloves: null, hat: null, tattoos: [] };
+export const NO_OUTFIT: Outfit = { shirt: null, hoodie: null, skirt: null, pants: null, socks: null, shoes: null, gloves: null, hat: null, tattoos: [] };
 export const MAX_TATTOOS = 2;
 
 // ---------------------------------------------------------------- reading recipes
@@ -60,7 +64,7 @@ const pick = <T extends string>(v: unknown, from: readonly T[], fallback: T): T 
 export function parseOutfit(data: unknown): Outfit {
   const d = obj(data);
   if (!d) return structuredClone(NO_OUTFIT);
-  const s = obj(d.shirt), p = obj(d.pants), so = obj(d.socks), sh = obj(d.shoes), g = obj(d.gloves), h = obj(d.hat);
+  const s = obj(d.shirt), hd = obj(d.hoodie), sk = obj(d.skirt), p = obj(d.pants), so = obj(d.socks), sh = obj(d.shoes), g = obj(d.gloves), h = obj(d.hat);
   return {
     shirt: s && {
       color: col(s.color, '#ffffff'), length: num(s.length, 0.6), sleeves: num(s.sleeves, 0.3),
@@ -69,6 +73,8 @@ export function parseOutfit(data: unknown): Outfit {
         ? { pattern: 'stripes' as const, patternColor: s.stripes.toLowerCase() }
         : { pattern: pick(s.pattern, SHIRT_PATTERNS, 'plain'), patternColor: col(s.patternColor, '#2b2d42') }),
     },
+    hoodie: hd && { color: col(hd.color, '#8d99ae'), hoodUp: hd.hoodUp === true, pocket: hd.pocket !== false },
+    skirt: sk && { color: col(sk.color, '#e63946'), length: num(sk.length, 0.4), flare: num(sk.flare, 0.5), pleats: sk.pleats === true },
     pants: p && { color: col(p.color, '#3d5a80'), rise: num(p.rise, 0.4), legs: num(p.legs, 0.8) },
     socks: so && { color: col(so.color, '#ffffff'), height: num(so.height, 0.3) },
     shoes: sh && { color: col(sh.color, '#333333'), height: num(sh.height, 0.2) },
@@ -104,6 +110,8 @@ export function randomOutfit(rand: () => number = Math.random): Outfit {
   }
   return {
     shirt: r() < 0.7 ? { color: c(), length: between(0.3, 0.9), sleeves: r() < 0.5 ? 0 : between(0.25, 1), pattern: r() < 0.4 ? SHIRT_PATTERNS[1 + Math.floor(r() * (SHIRT_PATTERNS.length - 1))] : 'plain', patternColor: c() } : null,
+    hoodie: r() < 0.12 ? { color: c(), hoodUp: r() < 0.3, pocket: r() < 0.8 } : null,
+    skirt: r() < 0.15 ? { color: c(), length: between(0, 0.8), flare: between(0.2, 1), pleats: r() < 0.4 } : null,
     pants: r() < 0.65 ? { color: c(), rise: between(0.1, 0.7), legs: r() < 0.3 ? 0 : between(0.3, 1) } : null,
     socks: r() < 0.3 ? { color: c(), height: between(0, 1) } : null,
     shoes: r() < 0.5 ? { color: c(), height: between(0, 0.6) } : null,
@@ -126,6 +134,7 @@ export class OutfitPainter {
     uShirt: { value: new THREE.Vector4() }, // on, bottom y, sleeve t, pattern (index in SHIRT_PATTERNS; 0 plain)
     uPattern: { value: new THREE.Vector4() }, // repeats round the body, repeats round a fin, repeat size
     uShirtTop: { value: 0 },
+    uHoodie: { value: new THREE.Vector4() }, // on, pocket, pocket bottom y, pocket top y
     uShirtColor: { value: new THREE.Color() },
     uStripeColor: { value: new THREE.Color() },
     uPants: { value: new THREE.Vector4() }, // on, top y, leg t, 0
@@ -165,24 +174,30 @@ export class OutfitPainter {
         .replace('#include <color_fragment>', `#include <color_fragment>\n${FRAGMENT_PAINT}`);
     };
     // All tenants share one compiled shader; only their uniforms differ.
-    material.customProgramCacheKey = () => 'tenant-outfit-2';
+    material.customProgramCacheKey = () => 'tenant-outfit-3';
   }
 
   /** Wear this outfit (live: the next frame shows it). */
   set(o: Outfit): void {
     const D = this.dims, U = this.u;
     const lerp = THREE.MathUtils.lerp;
-    if (o.shirt) {
+    // A hoodie is painted as a long, long-sleeved top over any shirt.
+    const top = o.hoodie
+      ? { color: o.hoodie.color, length: 0.95, sleeves: 0.88, pattern: 'plain' as const, patternColor: o.hoodie.color }
+      : o.shirt;
+    if (top) {
       // Bottom: from a crop top just under the chest to down over the hips.
-      const bottom = lerp(D.spineY + 0.35 * (D.shoulderY - D.spineY), D.hipY - 0.03, o.shirt.length);
-      U.uShirt.value.set(1, bottom, o.shirt.sleeves * 0.97, SHIRT_PATTERNS.indexOf(o.shirt.pattern));
+      const bottom = lerp(D.spineY + 0.35 * (D.shoulderY - D.spineY), D.hipY - 0.03, top.length);
+      U.uShirt.value.set(1, bottom, top.sleeves * 0.97, SHIRT_PATTERNS.indexOf(top.pattern));
       // A whole number of repeats round the body and the fins, so there's no seam at the back.
-      const cell = PATTERN_CELL[o.shirt.pattern];
+      const cell = PATTERN_CELL[top.pattern];
       const round = (r: number) => Math.max(3, Math.round((2 * Math.PI * r) / cell));
       U.uPattern.value.set(round(D.bellyR), round(U.uSizes.value.z), cell, 0);
-      U.uShirtColor.value.set(o.shirt.color);
-      U.uStripeColor.value.set(o.shirt.patternColor);
-    } else U.uShirt.value.set(0, 0, 0, 0);
+      U.uShirtColor.value.set(top.color);
+      U.uStripeColor.value.set(top.patternColor);
+      // The kangaroo pocket: across the front, from just above the hem a third of the way up.
+      U.uHoodie.value.set(o.hoodie ? 1 : 0, o.hoodie?.pocket ? 1 : 0, bottom + 0.012, bottom + 0.38 * (D.spineY + 0.03 - bottom));
+    } else { U.uShirt.value.set(0, 0, 0, 0); U.uHoodie.value.set(0, 0, 0, 0); }
     if (o.pants) {
       U.uPants.value.set(1, lerp(D.hipY + 0.01, D.spineY + 0.01, o.pants.rise), o.pants.legs < 0.02 ? -1 : lerp(0.12, 0.9, o.pants.legs), 0);
       U.uPantsColor.value.set(o.pants.color);
@@ -224,7 +239,7 @@ const FRAGMENT_DECL = /* glsl */ `
 varying vec4 vClothA; // how much of this point is belly, leg, fin, butt
 varying vec4 vClothB; // height on the body, fraction along a limb (0 root … 1 tip), angle round the body, angle round the limb
 varying vec3 vRest;   // rest-pose position: its x says which side a limb is on
-uniform vec4 uShirt; uniform vec4 uPattern; uniform float uShirtTop; uniform vec3 uShirtColor; uniform vec3 uStripeColor;
+uniform vec4 uShirt; uniform vec4 uPattern; uniform vec4 uHoodie; uniform float uShirtTop; uniform vec3 uShirtColor; uniform vec3 uStripeColor;
 uniform vec4 uPants; uniform vec3 uPantsColor;
 uniform vec4 uSocks; uniform vec3 uSocksColor;
 uniform vec4 uShoes; uniform vec3 uShoesColor;
@@ -297,7 +312,7 @@ const FRAGMENT_PAINT = /* glsl */ `
     float onBody = body * above(y, uShirt.y) * (1.0 - above(y, uShirtTop));
     float onFin = fin * (1.0 - above(t, uShirt.z));
     // As for pants: summed, then sharpened, so the shoulder seam has no gap.
-    float m = part(vClothA.x * above(y, uShirt.y) * (1.0 - above(y, uShirtTop)) + vClothA.z * (1.0 - above(t, uShirt.z)));
+    float m = part((vClothA.x + vClothA.w) * above(y, uShirt.y) * (1.0 - above(y, uShirtTop)) + vClothA.z * (1.0 - above(t, uShirt.z)));
     vec3 c = uShirtColor;
     if (uShirt.w > 0.5) {
       // Pattern coordinates in repeats: round (a whole number of them) and up.
@@ -329,6 +344,26 @@ const FRAGMENT_PAINT = /* glsl */ `
       c = mix(c, uStripeColor, k);
     }
     float hem = max(body * (1.0 - above(y, uShirt.y + 0.006)), fin * above(t, uShirt.z - 0.04)) * 0.15;
+    if (uHoodie.x > 0.5) {
+      // Ribbed cuffs and waistband are a bit deeper; then the pocket and drawstrings.
+      hem *= 1.6;
+      float ang = atan(vRest.x, vRest.z);
+      if (uHoodie.y > 0.5) {
+        float u = clamp((y - uHoodie.z) / max(1e-4, uHoodie.w - uHoodie.z), 0.0, 1.0);
+        float halfW = mix(0.85, 0.55, u); // narrower at the top: a trapezoid
+        float d = max((abs(ang) - halfW) * uSizes.x, max(uHoodie.z - y, y - uHoodie.w));
+        float aa = fwidth(d) * 0.75 + 1e-5;
+        float inside = 1.0 - smoothstep(-aa, aa, d);
+        float seam = 1.0 - smoothstep(0.0012 - aa, 0.0012 + aa, abs(d));
+        c *= 1.0 - body * (0.07 * inside + 0.22 * seam);
+      }
+      // Two drawstrings hanging from the neck at the front.
+      float sx = abs(abs(vRest.x) - 0.011);
+      float aa2 = fwidth(sx) * 0.75 + 1e-5;
+      float str = body * step(0.0, vRest.z) * (1.0 - smoothstep(0.0016 - aa2, 0.0016 + aa2, sx))
+        * above(y, uShirtTop - 0.07) * (1.0 - above(y, uShirtTop - 0.004));
+      c = mix(c, vec3(0.95), str);
+    }
     col = mix(col, c * (1.0 - hem), m);
   }
   if (uShoes.x > 0.5) {

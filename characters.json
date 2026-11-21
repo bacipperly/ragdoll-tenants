@@ -7,12 +7,12 @@
       "color": "#3a86ff",
       "mood": "calm",
       "traits": {
-        "age": 1,
+        "age": 0.5,
         "weight": 0,
-        "fitness": -0.2
+        "fitness": 0
       },
       "proportions": {
-        "headSize": 0.8,
+        "headSize": 0.7,
         "headFloat": 1,
         "bodyWidth": 0.83,
         "bodyHeight": 0.65,

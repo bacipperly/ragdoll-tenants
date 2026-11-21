@@ -243,7 +243,8 @@ function readMoveInput(dt: number) {
   if (keys.has('KeyD')) move.add(camRight);
   if (keys.has('KeyA')) move.sub(camRight);
   if (move.lengthSq() > 0) move.normalize();
-  ragdoll.setMoveInput(move.x, move.y, keys.has('ShiftLeft') || keys.has('ShiftRight'));
+  // Walks by default; holding Shift runs (full speed).
+  ragdoll.setMoveInput(move.x, move.y, !(keys.has('ShiftLeft') || keys.has('ShiftRight')));
 }
 
 // ---- Loop ----
@@ -314,7 +315,7 @@ function frame(now: number) {
   hud.innerHTML =
     `<b>Active ragdoll POC</b>   you: <b>${ragdoll.recipe.name}</b>   tenants: ${crowd.tenants.length}\n` +
     `Click a tenant to be them\n` +
-    `WASD  move (camera-relative)   Shift  stroll\n` +
+    `WASD  walk (camera-relative)   Shift  run\n` +
     `K     knockout / get up        F      shove\n` +
     `Drag  orbit   Wheel zoom   Q/E  orbit   C  ${useOrtho ? 'close-up camera' : 'game (ortho) camera'}\n` +
     `Space jump                     B      ${ragdoll.showingSkeleton ? 'hide' : 'show'} skeleton\n` +

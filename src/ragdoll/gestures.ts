@@ -21,11 +21,14 @@ export interface Extras {
   legLiftL: number; legLiftR: number; // lift one leg (knee up)
   chestRoll: number; // roll the chest side to side
   bellyRoll: number; // roll the whole body side to side
-  bow: number; // tip the whole body forward
+  bow: number; // tip the whole body forward (the legs swing to keep the feet put)
+  waist: number; // bend forward at the waist (the chest over the belly)
+  headDown: number; // hang the head further forward
+  eyesShut: number; // 0..1 lids down (a bow's closed eyes)
   dip: number; // sink the body down (units)
 }
 
-export type GestureEvent = 'hop' | 'smallHop' | 'thump';
+export type GestureEvent = 'hop' | 'littleHop' | 'smallHop' | 'thump' | 'recoil';
 
 export interface Frame {
   letters: Word;
@@ -60,14 +63,15 @@ export const GESTURES = {
     seconds: 1.6, blendIn: 0.12, blendOut: 0.2,
     letters: { headTilt: 0.35, smile: 1, eyeOpen: 0.2, browShow: 0.3, browHeight: 0.5 },
     frame(_p, t, o) {
-      o.extras.finRaiseR = 1.5 + 0.3 * osc(t, 2.5);
+      // The whole fin, held straight, swings side to side from the shoulder.
+      o.extras.finRaiseR = 1.55 + 0.28 * osc(t, 2.5);
       o.extras.finFwdR = 0.3;
-      o.extras.elbowR = 0.5 + 0.4 * osc(t, 2.5, 1.2);
+      o.extras.elbowR = -0.4; // undoes the fin's resting curl
     },
   },
   /** A happy little jump. */
   hop: {
-    seconds: 1.0, blendIn: 0.08, blendOut: 0.25, events: [{ at: 0, event: 'hop' }],
+    seconds: 0.9, blendIn: 0.08, blendOut: 0.25, events: [{ at: 0, event: 'littleHop' }],
     letters: { smile: 1, mouthOpen: 0.4, eyeOpen: 0.3 },
     frame(p, _t, o) {
       o.extras.finRaiseL = o.extras.finRaiseR = 0.5 * bell(p, 0.4, 0.2);
@@ -97,15 +101,23 @@ export const GESTURES = {
   },
   /** A low, polite bow. */
   bow: {
-    seconds: 1.5, blendIn: 0.1, blendOut: 0.25,
-    letters: { spine: -0.8, headPitch: -0.6, finsBack: -0.5, elbowBend: 0.5, eyeOpen: -0.7, smile: 0.6 },
+    seconds: 1.8, blendIn: 0.1, blendOut: 0.25,
+    letters: { finsBack: -0.3, finsSpread: -0.6, elbowBend: 0.2, smile: 0.5 },
     frame(p, _t, o) {
-      o.extras.bow = 0.55 * hold(p, 0.05, 0.35, 0.65, 0.95);
+      // Feet planted: the belly tips only a little (the legs swing to stay under it), and
+      // the real bend is at the waist, head down, eyes closed.
+      const b = hold(p, 0.05, 0.35, 0.65, 0.92);
+      o.extras.bow = 0.3 * b;
+      o.extras.waist = 0.75 * b;
+      o.extras.headDown = 0.6 * b;
+      o.letters.headPitch = -0.8 * b;
+      o.extras.eyesShut = smooth(p, 0.15, 0.3) * (1 - smooth(p, 0.7, 0.85));
+      o.letters.lean = 0;
     },
   },
   /** Everything droops: a big deflating slump. */
   slump: {
-    seconds: 1.6, blendIn: 0.15, blendOut: 0.4,
+    seconds: 2.1, blendIn: 0.15, blendOut: 0.4,
     letters: {
       spine: -1, headPitch: -1, finsLift: -1, finsSpread: -0.3, tension: -0.8, energy: -1,
       eyeOpen: -0.5, smile: -0.3, mouthOpen: 0.2,
@@ -114,44 +126,66 @@ export const GESTURES = {
       o.extras.dip = 0.03;
     },
   },
-  /** Knee up, then STOMP. */
+  /** Boom, boom, boom: left, right, left, each knee up then STOMP. */
   stomp: {
-    seconds: 1.0, blendIn: 0.08, blendOut: 0.3, events: [{ at: 0.46, event: 'thump' }],
+    seconds: 1.5, blendIn: 0.06, blendOut: 0.2,
+    events: [{ at: 0.24, event: 'thump' }, { at: 0.49, event: 'thump' }, { at: 0.74, event: 'thump' }],
     letters: {
       browShow: 1, browAngle: 0.9, browHeight: -0.4, smile: -0.7, finsBack: 0.5, finsSpread: 0.5, spine: -0.2, lean: 0.15,
     },
     frame(p, _t, o) {
       // The legs are short stubs, so the knee has to come right up for it to read.
-      o.extras.legLiftR = 1.6 * smooth(p, 0, 0.35) * (1 - smooth(p, 0.4, 0.46));
-      o.extras.dip = 0.03 * bell(p, 0.55, 0.08);
+      // Each stomp: knee up over 0.14, a beat, then slammed down by the thump.
+      const lift = (at: number) => 1.5 * smooth(p, at - 0.2, at - 0.07) * (1 - smooth(p, at - 0.035, at));
+      o.extras.legLiftL = lift(0.24) + lift(0.74);
+      o.extras.legLiftR = lift(0.49);
+      o.extras.dip = 0.025 * (bell(p, 0.27, 0.04) + bell(p, 0.52, 0.04) + bell(p, 0.77, 0.04));
+      o.extras.bellyRoll = 0.08 * (smooth(p, 0.04, 0.17) - 2 * smooth(p, 0.29, 0.42) + 2 * smooth(p, 0.54, 0.67) - smooth(p, 0.8, 0.95));
     },
   },
-  /** Recoils from something: hunched, fins up in front of the face, eyes squeezed shut. */
+  /** Something's coming at its face: steps back, head jerks back, fins up in front, eyes squeezed shut. */
   flinch: {
-    seconds: 0.7, blendIn: 0.06, blendOut: 0.5,
+    seconds: 0.9, blendIn: 0.05, blendOut: 0.45, events: [{ at: 0, event: 'recoil' }],
     letters: {
-      spine: -0.7, headPitch: -0.6, lean: -0.35, finsSpread: -1, finsBack: -0.9, elbowBend: 1, finsLift: 0.3, tension: 0.6,
+      spine: 0.5, headPitch: 0.9, lean: -1, finsSpread: -0.4, finsBack: -1, elbowBend: 0.3, finsLift: 0.6, tension: 0.6,
       eyeOpen: -1, smile: -0.6, browShow: 0.8, browAngle: -0.6,
     },
     frame(_p, _t, o) {
-      o.extras.dip = 0.02;
+      o.extras.finFwdL = o.extras.finFwdR = 0.5;
+      o.extras.headDown = -0.25;
     },
   },
   /** Jumps out of its skin. */
   startle: {
-    seconds: 0.9, blendIn: 0.04, blendOut: 0.5, events: [{ at: 0, event: 'smallHop' }],
+    seconds: 1.4, blendIn: 0.04, blendOut: 0.35, events: [{ at: 0, event: 'smallHop' }],
     letters: {
-      spine: 0.7, finsLift: 1, finsSpread: 1, tremble: 0.3,
-      eyeOpen: 1, mouthOpen: 1, browShow: 1, browHeight: 1, browAngle: -0.3, smile: 0,
+      spine: 0.7, headPitch: 0.4, lean: -0.3, finsSpread: 0.5, tremble: 0.3,
+      eyeOpen: 1, mouthOpen: 0.6, browShow: 1, browHeight: 1, browAngle: -0.3, smile: -0.25, tongue: 0, gazeY: 0,
+    },
+    frame(p, _t, o) {
+      // Hands thrown up, held up while it gets over it, then lowered.
+      const up = hold(p, 0, 0.05, 0.6, 0.9);
+      o.extras.finRaiseL = o.extras.finRaiseR = 1.5 * up;
+      o.extras.elbowL = o.extras.elbowR = 0.3 * up;
     },
   },
-  /** Jumps for joy, pumping both fins. */
+  /** "YES!": winds up, springs up with both fins thrown up in a V, then two fist pumps. */
   celebrate: {
-    seconds: 1.6, blendIn: 0.08, blendOut: 0.2, events: [{ at: 0.05, event: 'hop' }],
-    letters: { smile: 1, mouthOpen: 0.7, eyeOpen: -0.45, headPitch: 0.4, spine: 0.6, energy: 1 },
-    frame(_p, t, o) {
-      o.extras.finRaiseL = o.extras.finRaiseR = 1.6 + 0.35 * osc(t, 3);
-      o.extras.elbowL = o.extras.elbowR = 0.3;
+    seconds: 2.0, blendIn: 0.06, blendOut: 0.18, events: [{ at: 0.14, event: 'hop' }],
+    letters: { smile: 1, eyeOpen: -0.6, energy: 1 },
+    frame(p, _t, o) {
+      // Wind-up: a crouch with the fins pulled down and back, head down.
+      const windUp = hold(p, 0, 0.08, 0.1, 0.15);
+      // The V: straight fins thrown up, held, then two pumps (down a little, back up).
+      const v = hold(p, 0.12, 0.2, 0.8, 0.95);
+      const pumps = bell(p, 0.55, 0.05) + bell(p, 0.7, 0.05);
+      o.extras.finRaiseL = o.extras.finRaiseR = -0.4 * windUp + v * (1.75 - 0.7 * pumps);
+      o.extras.elbowL = o.extras.elbowR = -0.4 * v + 0.9 * pumps;
+      o.extras.dip = 0.04 * windUp + 0.02 * pumps;
+      o.letters.headPitch = -0.5 * windUp + 0.6 * v;
+      o.letters.spine = -0.4 * windUp + 0.7 * v;
+      o.letters.finsBack = 0.8 * windUp;
+      o.letters.mouthOpen = 0.8 * v + 0.2 * pumps;
     },
   },
   /** "Dunno": fins out, elbows bent, head cocked, brows up. */
@@ -172,7 +206,8 @@ export const GESTURES = {
       o.letters.spine = 0.4 * inhale - 0.7 * exhale;
       o.letters.headPitch = 0.3 * inhale - 0.5 * exhale;
       o.letters.finsLift = -0.6 * exhale;
-      o.letters.mouthOpen = 0.35 * exhale;
+      // The mouth opens for the breath in and stays open while it's let out.
+      o.letters.mouthOpen = 0.35 * smooth(p, 0.04, 0.16);
     },
   },
   /** Yes, yes. */
@@ -180,7 +215,8 @@ export const GESTURES = {
     seconds: 0.9, blendIn: 0.1, blendOut: 0.2,
     letters: { smile: 0.9, eyeOpen: -0.2 },
     frame(p, _t, o) {
-      o.letters.headPitch = -0.7 * Math.max(0, Math.sin(2 * TAU * p));
+      // Two smooth dips: the head does the work, gently enough not to rock the body.
+      o.letters.headPitch = -0.6 * (0.5 - 0.5 * Math.cos(2 * TAU * p));
     },
   },
   /** No, no. */
@@ -198,7 +234,7 @@ export const GESTURE_NAMES = Object.keys(GESTURES) as GestureName[];
 
 const EXTRA_KEYS: (keyof Extras)[] = [
   'yaw', 'finRaiseL', 'finRaiseR', 'finFwdL', 'finFwdR', 'elbowL', 'elbowR', 'legLiftL', 'legLiftR',
-  'chestRoll', 'bellyRoll', 'bow', 'dip',
+  'chestRoll', 'bellyRoll', 'bow', 'waist', 'headDown', 'eyesShut', 'dip',
 ];
 
 export function emptyExtras(): Extras {

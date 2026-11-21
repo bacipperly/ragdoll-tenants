@@ -295,6 +295,14 @@ export class ActiveRagdoll {
   /** What a gesture's events do: hop, a little startled hop, a stomp's thump. */
   private readonly fireGesture = (e: GestureEvent): void => {
     if (e === 'hop') this.jump();
+    else if (e === 'littleHop') this.jump(0.5);
+    else if (e === 'recoil') {
+      // A quick step back, away from whatever's coming.
+      if (!this.grounded) return;
+      const back = -1.1 * this.totalMass;
+      this.force.x = Math.sin(this.facing) * back; this.force.y = 0; this.force.z = Math.cos(this.facing) * back;
+      this.torso.body.applyImpulse(this.force, true);
+    }
     else if (e === 'smallHop') {
       if (!this.grounded || this.jumpPhase !== 'ground') return;
       this.force.x = 0; this.force.y = (1.4 * this.traits.jump - this.vel.y) * this.totalMass; this.force.z = 0;
@@ -394,6 +402,8 @@ export class ActiveRagdoll {
   private jumpPhase: 'ground' | 'crouch' | 'air' = 'ground';
   /** Seconds left of the take-off crouch. */
   private crouchTimer = 0;
+  /** Take-off speed of the jump being crouched for. */
+  private jumpSpeed = 0;
   /** Seconds since take-off. */
   private airTime = 0;
   /** Eased 0..1: how much of the airborne pose (tucked legs, flung-up fins) to show. */
@@ -730,8 +740,10 @@ export class ActiveRagdoll {
    * Jump, if it's standing on something and has its strength. It crouches for a moment
    * first (so the jump reads), then launches; see updateJump.
    */
-  jump(): void {
+  jump(height = 1): void {
     if (this.knockedOut || this.muscle < 0.8 || !this.grounded || this.jumpPhase !== 'ground') return;
+    // Height goes with the square of take-off speed.
+    this.jumpSpeed = JUMP.velocity * this.traits.jump * Math.sqrt(height);
     this.jumpPhase = 'crouch';
     this.crouchTimer = JUMP.crouchSeconds;
   }
@@ -1323,13 +1335,13 @@ export class ActiveRagdoll {
     if (this.hat?.isLoose) this.hat.sync(dt, alpha);
     if (this.detail === 'full') {
       this.goo.update(dt, this.part('head').bone.quaternion, this.headAccel, this.gooContact, this.traits.squish, this.muscle * this.muscle);
-      this.face.setExpression(this.faceAwake, this.moods.letters, this.blink); // also rides it on the goo
+      this.face.setExpression(this.faceAwake, this.moods.letters, Math.max(this.blink, this.gestures.extras.eyesShut)); // also rides it on the goo
       if (this.hat && !this.hat.isLoose) this.hat.conform();
     } else if (this.detail === 'far' && ++this.farFrames >= FAR_FACE_EVERY) {
       // Too small to see a wobble or read a face: the goo rests, and the face is redrawn
       // now and then so blinks and moods still come through.
       this.farFrames = 0;
-      this.face.setExpression(this.faceAwake, this.moods.letters, this.blink);
+      this.face.setExpression(this.faceAwake, this.moods.letters, Math.max(this.blink, this.gestures.extras.eyesShut));
     }
     this.jiggleButt(dt);
   }
@@ -1517,9 +1529,9 @@ export class ActiveRagdoll {
       if (this.crouchTimer <= 0) {
         // Launch: set the belly's upward speed, with the WHOLE body's mass behind it so
         // everything comes along (the limbs trail a little through the joints).
-        this.force.x = 0; this.force.y = (JUMP.velocity * this.traits.jump - this.vel.y) * this.totalMass; this.force.z = 0;
+        this.force.x = 0; this.force.y = (this.jumpSpeed - this.vel.y) * this.totalMass; this.force.z = 0;
         this.torso.body.applyImpulse(this.force, true);
-        this.liftHeld(JUMP.velocity * this.traits.jump);
+        this.liftHeld(this.jumpSpeed);
         this.jumpPhase = 'air';
         this.airTime = 0;
         this.heightIntegral = 0;
@@ -1722,7 +1734,7 @@ export class ActiveRagdoll {
           // other way. Plus a little breathing when standing.
           // Spine letter: slumped forward (+x) or chest puffed out (−x).
           j.target.set(
-            0.03 * breathe * (1 - w) - 0.4 * P.spine,
+            0.03 * breathe * (1 - w) - 0.4 * P.spine + X.waist,
             0,
             -GAIT.chestCounterRoll * GAIT.stepRoll * s * w + 0.03 * shake(33) + X.chestRoll,
           );
@@ -1739,7 +1751,7 @@ export class ActiveRagdoll {
           // hanging, cocked to one side.
           const turn = 0.6 * P.headTurn + 0.35 * P.fidget * this.noise(2);
           this.qHead.setFromAxisAngle(this.axisY, this.facing + X.yaw + turn).premultiply(this.qCur);
-          this.qLean.setFromAxisAngle(this.axisX, 0.05 * Math.abs(s) * w + 0.015 * breathe * (1 - w) - 0.5 * P.headPitch);
+          this.qLean.setFromAxisAngle(this.axisX, 0.05 * Math.abs(s) * w + 0.015 * breathe * (1 - w) - 0.5 * P.headPitch + X.headDown);
           this.qHead.multiply(this.qLean);
           this.qLean.setFromAxisAngle(this.axisZ, 0.4 * P.headTilt);
           this.qHead.multiply(this.qLean);
@@ -1765,7 +1777,8 @@ export class ActiveRagdoll {
           // In the air the legs swing up in front; crouching/landing bends them a bit too.
           // A gesture can lift one knee (a stomp).
           j.target.set(
-            -legSwing * (1 - this.air) - JUMP.kneesUp * this.air - 0.3 * this.bend() - (left ? X.legLiftL : X.legLiftR)
+            // A bow tips the belly forward; the legs swing forward as much so the feet stay put.
+            -legSwing * (1 - this.air) - JUMP.kneesUp * this.air - 0.3 * this.bend() - (left ? X.legLiftL : X.legLiftR) - X.bow
               - 0.7 * flail(11, left ? 0 : Math.PI),
             0, side * 0.04,
           );

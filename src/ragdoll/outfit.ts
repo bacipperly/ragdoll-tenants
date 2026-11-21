@@ -286,7 +286,9 @@ const FRAGMENT_PAINT = /* glsl */ `
   // Socks, then pants over them, the shirt over the pants' top, shoes and gloves last.
   if (uSocks.x > 0.5) col = mix(col, uSocksColor, leg * above(t, uSocks.y));
   if (uPants.x > 0.5) {
-    float m = max(max(body * (1.0 - above(y, uPants.y)), butt), leg * (1.0 - above(t, uPants.z)));
+    // Covered weight summed over the parts before sharpening: sharpening each part on its
+    // own left a half-covered ring where the butt blends into the body and legs.
+    float m = part(vClothA.x * (1.0 - above(y, uPants.y)) + vClothA.w + vClothA.y * (1.0 - above(t, uPants.z)));
     // A darker hem at the leg openings.
     float hem = leg * above(t, uPants.z - 0.05) * 0.18;
     col = mix(col, uPantsColor * (1.0 - hem), m);
@@ -294,7 +296,8 @@ const FRAGMENT_PAINT = /* glsl */ `
   if (uShirt.x > 0.5) {
     float onBody = body * above(y, uShirt.y) * (1.0 - above(y, uShirtTop));
     float onFin = fin * (1.0 - above(t, uShirt.z));
-    float m = max(onBody, onFin);
+    // As for pants: summed, then sharpened, so the shoulder seam has no gap.
+    float m = part(vClothA.x * above(y, uShirt.y) * (1.0 - above(y, uShirtTop)) + vClothA.z * (1.0 - above(t, uShirt.z)));
     vec3 c = uShirtColor;
     if (uShirt.w > 0.5) {
       // Pattern coordinates in repeats: round (a whole number of them) and up.

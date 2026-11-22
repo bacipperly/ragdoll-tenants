@@ -1946,7 +1946,7 @@ export class ActiveRagdoll implements AccentSubject {
             // A bow tips the belly forward; the legs swing forward as much so the feet stay put.
             -legSwing * (1 - this.air) - JUMP.kneesUp * this.air - 0.3 * this.bend() - (left ? X.legLiftL : X.legLiftR) - X.bow
               - 0.7 * flail(11, left ? 0 : Math.PI),
-            0, side * 0.04,
+            0, side * (0.04 - JUMP.kneesIn * this.air), // in the air, knees tuck in clear of the fins
           );
           j.targetVel.x = -(left ? ds : -ds) * hipSwing * w;
           break;
@@ -1973,7 +1973,7 @@ export class ActiveRagdoll implements AccentSubject {
               - 0.15 * hoisting - 1.25 * hugging,
             0,
             side * (GAIT.armOut + 0.03 * breathe * (1 - w) + 0.35 * P.finsSpread + lift
-              + JUMP.finsUp * this.air + 0.05 * shake(41) + (left ? X.finRaiseL : X.finRaiseR)
+              + JUMP.finsUp * this.finsOut() + 0.05 * shake(41) + (left ? X.finRaiseL : X.finRaiseR)
               + 1.75 * hoisting - 0.25 * hugging + kick * 0.7 + 0.5 * flail(9, left ? 0 : 1.7)),
           );
           j.targetVel.x = (left ? ds : -ds) * armSwingAmp * w * (1 - hold);
@@ -1986,7 +1986,8 @@ export class ActiveRagdoll implements AccentSubject {
           const swingingForward = Math.max(0, -(left ? s : -s)) * w;
           // Elbow letter: bent forward (the hinge stops it bending far backward).
           // Hoisting straightens the fins into a clear V above the shoulders.
-          j.target.set(-((GAIT.finCurl + GAIT.finFollow * swingingForward + 0.9 * P.elbowBend + (left ? X.elbowL : X.elbowR)) * (1 - hoisting) + 0.9 * hugging), 0, 0);
+          // In the air the fins straighten as they fling out (and stay clear of the tucked knees).
+          j.target.set(-((GAIT.finCurl * (1 - 0.8 * this.air) + GAIT.finFollow * swingingForward + 0.9 * P.elbowBend + (left ? X.elbowL : X.elbowR)) * (1 - hoisting) + 0.9 * hugging), 0, 0);
           break;
         }
       }
@@ -2117,6 +2118,16 @@ export class ActiveRagdoll implements AccentSubject {
         return;
     }
     j.targetVel.multiplyScalar(1 - w);
+  }
+
+  /**
+   * How far the fins are flung up and out for a jump, 0..1: they start on the way down
+   * into the take-off crouch (an anticipating swing), so they're already clear of the
+   * knees when the body launches and the legs tuck, and are fully out in the air.
+   */
+  private finsOut(): number {
+    const crouch = this.jumpPhase === 'crouch' ? 1 - this.crouchTimer / JUMP.crouchSeconds : 0;
+    return Math.max(this.air, 0.7 * crouch);
   }
 
   /** How much the legs bend for the take-off crouch and the landing squash, 0..1. */

@@ -280,6 +280,78 @@ function classifyParts(pos: Float32Array, part: Int32Array): PartRole[] {
   return roles;
 }
 
+/**
+ * Closes each part's open edges. Segmenting cuts one mesh into pieces, leaving every
+ * part open where it was cut from its neighbour; where a part comes away from another
+ * as the body moves (a fin that hugged the side, lifting off it), you'd see into its
+ * hollow inside. Each open loop is filled with a fan of triangles to its middle, facing
+ * outward, so the part is a closed shell. Returns the mesh with the caps added.
+ */
+function capParts(pos: Float32Array, nrm: Float32Array, index: Uint32Array, part: Int32Array, roles: PartRole[]) {
+  const P = Array.from(pos), N = Array.from(nrm), I = Array.from(index), Q = Array.from(part);
+  const H = (() => { let lo = Infinity, hi = -Infinity; for (let i = 1; i < pos.length; i += 3) { lo = Math.min(lo, pos[i]); hi = Math.max(hi, pos[i]); } return hi - lo; })();
+  const q = (v: number) => Math.round((v / H) * 1e5);
+  // Weld within each part (texture seams duplicate points), so only real cuts are open.
+  const id = new Int32Array(pos.length / 3), byKey = new Map<string, number>();
+  for (let v = 0; v < id.length; v++) {
+    const k = `${part[v]}:${q(pos[v * 3])},${q(pos[v * 3 + 1])},${q(pos[v * 3 + 2])}`;
+    id[v] = byKey.get(k) ?? (byKey.set(k, v), v);
+  }
+  const count = new Map<string, number>(), dir = new Map<string, [number, number]>();
+  for (let t = 0; t < index.length; t += 3) {
+    for (let e = 0; e < 3; e++) {
+      const a = id[index[t + e]], b = id[index[t + (e + 1) % 3]];
+      if (a === b) continue;
+      const k = a < b ? `${a},${b}` : `${b},${a}`;
+      count.set(k, (count.get(k) ?? 0) + 1);
+      dir.set(k, [a, b]);
+    }
+  }
+  const next = new Map<number, number>();
+  for (const [k, c] of count) if (c === 1) { const [a, b] = dir.get(k)!; next.set(a, b); }
+  // Each part's middle, so every cap can be made to face away from it (outward).
+  const mid = new Map<number, [number, number, number, number]>();
+  for (let v = 0; v < id.length; v++) {
+    const m = mid.get(part[v]) ?? [0, 0, 0, 0];
+    m[0] += pos[v * 3]; m[1] += pos[v * 3 + 1]; m[2] += pos[v * 3 + 2]; m[3]++;
+    mid.set(part[v], m);
+  }
+  const seen = new Set<number>();
+  let capped = 0;
+  for (const start of next.keys()) {
+    if (seen.has(start) || roles[part[start]] === 'face') continue;
+    const loop: number[] = [];
+    let v = start;
+    while (!seen.has(v) && next.has(v) && loop.length < 5000) { seen.add(v); loop.push(v); v = next.get(v)!; }
+    if (v !== start || loop.length < 3) continue; // not a clean loop: leave it
+    let cx = 0, cy = 0, cz = 0;
+    for (const u of loop) { cx += pos[u * 3]; cy += pos[u * 3 + 1]; cz += pos[u * 3 + 2]; }
+    cx /= loop.length; cy /= loop.length; cz /= loop.length;
+    // The cap's facing: reversing the loop's edges closes the shell outward.
+    let nx = 0, ny = 0, nz = 0;
+    for (let k = 0; k < loop.length; k++) {
+      const a = loop[k], b = loop[(k + 1) % loop.length];
+      const ax = pos[a * 3] - cx, ay = pos[a * 3 + 1] - cy, az = pos[a * 3 + 2] - cz;
+      const bx = pos[b * 3] - cx, by = pos[b * 3 + 1] - cy, bz = pos[b * 3 + 2] - cz;
+      nx -= ay * bz - az * by; ny -= az * bx - ax * bz; nz -= ax * by - ay * bx;
+    }
+    // Face away from the part's middle (flipping the fan if the loop ran the other way).
+    const pm = mid.get(part[start])!;
+    const flip = nx * (cx - pm[0] / pm[3]) + ny * (cy - pm[1] / pm[3]) + nz * (cz - pm[2] / pm[3]) < 0;
+    if (flip) { nx = -nx; ny = -ny; nz = -nz; }
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    const centre = P.length / 3;
+    P.push(cx, cy, cz); N.push(nx / nl, ny / nl, nz / nl); Q.push(part[start]);
+    const dup = loop.map((u) => { const d = P.length / 3; P.push(pos[u * 3], pos[u * 3 + 1], pos[u * 3 + 2]); N.push(nx / nl, ny / nl, nz / nl); Q.push(part[u]); return d; });
+    for (let k = 0; k < loop.length; k++) {
+      if (flip) I.push(dup[k], dup[(k + 1) % loop.length], centre);
+      else I.push(dup[(k + 1) % loop.length], dup[k], centre);
+    }
+    capped++;
+  }
+  return { pos: Float32Array.from(P), nrm: Float32Array.from(N), index: Uint32Array.from(I), part: Int32Array.from(Q), capped };
+}
+
 /** Prepares a loaded mesh: turned to face +z, centred over its feet, its landmarks, limb angles and measurements found. */
 export function prepareBodyModel(name: string, positions: Float32Array, normals: Float32Array, index: Uint32Array, settings: BodyModelSettings = {},
   extra: { part?: Int32Array; rig?: ModelRig } = {}): BodyModel {
@@ -352,13 +424,36 @@ export function prepareBodyModel(name: string, positions: Float32Array, normals:
       finLength: finLen, finHalfWidth: finHalf, finRootX, legHalfWidth: legHalf, legX,
     };
   }
+  // Close the parts' cut edges (after measuring, which the caps don't change).
+  let finalPos = pos, finalNrm = nrm, finalIndex = index, finalPart = part;
+  if (part && roles.length) {
+    const c = capParts(pos, nrm, index, part, roles);
+    finalPos = c.pos; finalNrm = c.nrm; finalIndex = c.index; finalPart = c.part;
+  }
   if (settings.armAngle !== undefined) armAngle = THREE.MathUtils.degToRad(settings.armAngle);
   if (settings.legAngle !== undefined) legAngle = THREE.MathUtils.degToRad(settings.legAngle);
   const rig = extra.rig ?? null;
   return {
-    name, positions: pos, normals: nrm, index, landmarks, found, armAngle, legAngle, head: settings.head ?? 'goo',
-    weights: settings.weights === 'rig' && rig ? 'rig' : 'ours', part, roles, hip, rig, measures,
+    name, positions: finalPos, normals: finalNrm, index: finalIndex, landmarks, found, armAngle, legAngle, head: settings.head ?? 'goo',
+    weights: settings.weights === 'rig' && rig ? 'rig' : 'ours', part: finalPart, roles, hip, rig: rig && finalPos.length > pos.length ? extendRig(rig, (finalPos.length - pos.length) / 3, finalPart!, part!) : rig, measures,
   };
+}
+
+/**
+ * The model's own rig, extended to the caps' new vertices: each takes the weights of
+ * the first original vertex of its part at the same spot (a cap's middle, its part's first).
+ */
+function extendRig(rig: ModelRig, added: number, partAll: Int32Array, partOrig: Int32Array): ModelRig {
+  const n0 = partOrig.length;
+  const firstOfPart = new Map<number, number>();
+  for (let v = 0; v < n0; v++) if (!firstOfPart.has(partOrig[v])) firstOfPart.set(partOrig[v], v);
+  const joints = new Uint16Array((n0 + added) * 4), weights = new Float32Array((n0 + added) * 4);
+  joints.set(rig.joints); weights.set(rig.weights);
+  for (let v = n0; v < n0 + added; v++) {
+    const from = firstOfPart.get(partAll[v]) ?? 0;
+    for (let k = 0; k < 4; k++) { joints[v * 4 + k] = rig.joints[from * 4 + k]; weights[v * 4 + k] = rig.weights[from * 4 + k]; }
+  }
+  return { ...rig, joints, weights };
 }
 
 /** A rig bone's name → which of our bones it moves (Mixamo-style names, which Tripo uses). */
@@ -520,6 +615,80 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
     head: () => true, face: () => true,
   };
   const segByName = new Map(segs.map((g, i) => [g.name, i]));
+  // Every vertex's weight on every bone, worked out first so the seams can be welded.
+  const S = segs.length, allW = new Float32Array(count * S);
+  type LimbRole = 'finL' | 'finR' | 'legL' | 'legR';
+  /**
+   * A limb's weights at (x, y), as a rig would have them: the upper bone down to the
+   * elbow or knee, the lower bone past it, the body only at the root. Joints blend over
+   * a good stretch (in absolute terms too: short, thick legs otherwise crease sharply),
+   * so a tucked knee or a raised fin bends the skin smoothly instead of tearing it.
+   */
+  const chainInto = (limb: LimbRole, x: number, y: number, out: Float32Array) => {
+    const fin = limb.startsWith('fin'), sd = limb.endsWith('L') ? 'L' : 'R';
+    const up = segByName.get(fin ? `upperArm${sd}` : `thigh${sd}`)!, low = segByName.get(fin ? `forearm${sd}` : `shin${sd}`)!;
+    const root = segByName.get(fin ? 'chest' : 'torso')!;
+    const lb = segs[up].limb!, a = lb.side * lb.angle;
+    const t = (x - lb.px) * Math.sin(a) + (y - lb.py) * -Math.cos(a); // down the limb, as the model holds it
+    const upperLen = fin ? D.upperArmLen : D.thighLen;
+    const span = seamReach(limb);
+    // Where the limb was cut from the torso in a ring at its root (legs), the bend starts
+    // just below that ring, like a sleeve: the ring itself stays with the body, so the
+    // seam never opens. A limb fused to the body along its length (fins hugging the
+    // sides) can't be kept shut without dragging the body along, so it bends from the
+    // joint and its cut edges are capped instead (see capHoles).
+    const depth = seamDepth.get(limb) ?? -Infinity;
+    const from = depth > -Infinity && depth < 0.6 * upperLen ? depth : -0.4 * span;
+    const lower = THREE.MathUtils.smoothstep(t, Math.max(upperLen, from + span) - 0.6 * span, Math.max(upperLen, from + span) + 0.6 * span);
+    const body = 1 - THREE.MathUtils.smoothstep(t, from, from + 1.1 * span);
+    out.fill(0);
+    out[low] = (1 - body) * lower; out[up] = (1 - body) * (1 - lower); out[root] = body;
+  };
+  /** How far down each limb its seam with the torso reaches (along the limb, from the joint). */
+  const seamDepth = new Map<LimbRole, number>();
+  const seamReach = (limb: LimbRole) => limb.startsWith('fin')
+    ? Math.max(D.upperArmLen, 1.2 * D.upperArmR) : Math.max(D.thighLen, 1.2 * D.thighR);
+  /** Groups of kept vertices sitting at the same spot in the model (within a hair), via a spatial hash. */
+  const coincident = (n: number, at: (v: number) => number): number[][] => {
+    const tol = 2e-4 * (L.top - L.feet), cell = 4 * tol, grid = new Map<string, number[]>();
+    const parent = Int32Array.from({ length: n }, (_, i) => i);
+    const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    for (let v = 0; v < n; v++) {
+      const i = at(v), x = src[i * 3], y = src[i * 3 + 1], z = src[i * 3 + 2];
+      const cx = Math.floor(x / cell), cy = Math.floor(y / cell), cz = Math.floor(z / cell);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        for (const u of grid.get(`${cx + dx},${cy + dy},${cz + dz}`) ?? []) {
+          const j = at(u);
+          if (Math.hypot(src[j * 3] - x, src[j * 3 + 1] - y, src[j * 3 + 2] - z) <= tol) parent[find(u)] = find(v);
+        }
+      }
+      const k = `${cx},${cy},${cz}`;
+      (grid.get(k) ?? grid.set(k, []).get(k)!).push(v);
+    }
+    const out = new Map<number, number[]>();
+    for (let v = 0; v < n; v++) { const r = find(v); (out.get(r) ?? out.set(r, []).get(r)!).push(v); }
+    return [...out.values()].filter((g) => g.length > 1);
+  };
+  // Where each limb was cut from the torso: the points they share.
+  const seams = new Map<LimbRole, number[]>();
+  if (m.part) {
+    const withTorso = new Uint8Array(count);
+    for (const g of coincident(count, (v) => vSrc[v])) if (g.some((v) => vRole[v] === 'torso')) for (const v of g) withTorso[v] = 1;
+    for (let v = 0; v < count; v++) {
+      const r = vRole[v];
+      if (r !== 'finL' && r !== 'finR' && r !== 'legL' && r !== 'legR') continue;
+      if (!withTorso[v]) continue;
+      const list = seams.get(r) ?? seams.set(r, []).get(r)!;
+      list.push(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]);
+    }
+    for (const [limb, pts] of seams) {
+      const fin = limb.startsWith('fin'), sd = limb.endsWith('L') ? 'L' : 'R';
+      const lb = segs[segByName.get(fin ? `upperArm${sd}` : `thigh${sd}`)!].limb!, a = lb.side * lb.angle;
+      let deepest = -Infinity;
+      for (let k = 0; k < pts.length; k += 3) deepest = Math.max(deepest, (pts[k] - lb.px) * Math.sin(a) + (pts[k + 1] - lb.py) * -Math.cos(a));
+      seamDepth.set(limb, deepest);
+    }
+  }
   for (let v = 0; v < count; v++) {
     const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
     const role = vRole[v];
@@ -540,26 +709,9 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
     // elbow or knee, the lower bone past it (blended across the joint), and the body
     // only right at the root, so the limb follows its bones and bends at a clear joint.
     const chain = role === 'finL' || role === 'finR' || role === 'legL' || role === 'legR' ? role : null;
-    if (chain && m.weights !== 'rig') {
-      const fin = chain.startsWith('fin'), sd = chain.endsWith('L') ? 'L' : 'R';
-      const up = segByName.get(fin ? `upperArm${sd}` : `thigh${sd}`)!, low = segByName.get(fin ? `forearm${sd}` : `shin${sd}`)!;
-      const root = segByName.get(fin ? 'chest' : 'torso')!;
-      const lb = segs[up].limb!, a = lb.side * lb.angle;
-      const dx = Math.sin(a), dy = -Math.cos(a); // down the limb, as the model holds it
-      const t = (x - lb.px) * dx + (y - lb.py) * dy;
-      const upperLen = fin ? D.upperArmLen : D.thighLen;
-      // Joints blend over a good stretch (in absolute terms too: short, thick legs
-      // otherwise crease sharply), so a tucked knee or a raised fin bends the skin
-      // smoothly instead of stretching a few triangles to shreds.
-      const span = Math.max(upperLen, 1.2 * (fin ? D.upperArmR : D.thighR));
-      const lower = THREE.MathUtils.smoothstep(t, upperLen - 0.6 * span, upperLen + 0.6 * span);
-      const body = 1 - THREE.MathUtils.smoothstep(t, -0.4 * span, 0.7 * span);
-      w.fill(0);
-      w[low] = (1 - body) * lower; w[up] = (1 - body) * (1 - lower); w[root] = body;
-      sum = 1;
-    }
-    // The torso part: only the body's own bones, belly blending into chest by height
-    // (no pull from the limbs: that tore it at the hips and shoulders).
+    if (chain && m.weights !== 'rig') { chainInto(chain, x, y, w); sum = 1; }
+    // The torso part: only the body's own bones, belly blending into chest by height.
+    // (Pulling it along with the limbs drags the body's sides and hips out of shape.)
     if (role === 'torso' && m.weights !== 'rig') {
       const band = 0.6 * D.chestLen;
       const chest = THREE.MathUtils.smoothstep(y, D.spineY - band, D.spineY + band);
@@ -580,6 +732,34 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
       }
       if (sum <= 0) { const s = segByName.get('torso')!; w[s] = 1; sum = 1; }
     }
+    for (let s = 0; s < S; s++) allW[v * S + s] = w[s] / (sum || 1);
+  }
+
+  // Weld the seams. A segmented model's parts were cut from one mesh, so along each cut
+  // the parts' open edges sit on the very same points. Those points must move as one,
+  // or the cut opens into a hole as the limb moves: give every vertex at the same spot
+  // the same weights (the average of what each part would give it).
+  {
+    const groups = new Map<number, number[]>();
+    for (const g of coincident(count, (v) => vSrc[v])) groups.set(g[0], g);
+    const avg = new Float32Array(S);
+    // Only ring seams (a limb cut off at its root) are welded; a limb fused to the body
+    // along its length is left free to come away, its cut edges capped.
+    const fused = (r: PartRole | null) => (r === 'finL' || r === 'finR' || r === 'legL' || r === 'legR')
+      && (seamDepth.get(r) ?? -Infinity) >= 0.6 * (r.startsWith('fin') ? D.upperArmLen : D.thighLen);
+    for (const all of groups.values()) {
+      const g = all.filter((v) => !fused(vRole[v]));
+      if (g.length < 2) continue;
+      avg.fill(0);
+      for (const v of g) for (let s = 0; s < S; s++) avg[s] += allW[v * S + s] / g.length;
+      for (const v of g) allW.set(avg, v * S);
+    }
+  }
+
+  for (let v = 0; v < count; v++) {
+    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+    for (let s = 0; s < S; s++) w[s] = allW[v * S + s];
+    const sum = 1;
     order.sort((a, b) => w[b] - w[a]);
     let top = 0;
     for (let k = 0; k < 4; k++) top += w[order[k]];

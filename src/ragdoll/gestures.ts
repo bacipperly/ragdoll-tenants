@@ -179,7 +179,7 @@ export const GESTURES = {
       // The V: straight fins thrown up, held, then two pumps (down a little, back up).
       const v = hold(p, 0.12, 0.2, 0.8, 0.95);
       const pumps = bell(p, 0.55, 0.05) + bell(p, 0.7, 0.05);
-      o.extras.finRaiseL = o.extras.finRaiseR = -0.4 * windUp + v * (1.75 - 0.7 * pumps);
+      o.extras.finRaiseL = o.extras.finRaiseR = -0.15 * windUp + v * (1.75 - 0.7 * pumps); // (a small wind-up keeps the fins clear of the bending knees)
       o.extras.elbowL = o.extras.elbowR = -0.4 * v + 0.9 * pumps;
       o.extras.dip = 0.04 * windUp + 0.02 * pumps;
       o.letters.headPitch = -0.5 * windUp + 0.6 * v;

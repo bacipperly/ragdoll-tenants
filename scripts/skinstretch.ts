@@ -26,6 +26,15 @@ for (let t = 0; t < idx.length; t += 3) for (const [a, b] of [[idx[t], idx[t + 1
   if (l > 1e-5) edges.push([a, b, l]);
 }
 const worst = new Float32Array(edges.length);
+// Seams: vertices that start at the same spot (parts cut from one mesh) should stay together.
+const seamGroups: number[][] = [];
+{
+  const map = new Map<string, number[]>();
+  for (let i = 0; i < n; i++) { const k = `${Math.round(rest[i * 3] * 1e4)},${Math.round(rest[i * 3 + 1] * 1e4)},${Math.round(rest[i * 3 + 2] * 1e4)}`; (map.get(k) ?? map.set(k, []).get(k)!).push(i); }
+  for (const g of map.values()) if (g.length > 1) seamGroups.push(g);
+}
+let seamAt = '', seamGap = 0, finGap = 0, grow = 0, growAt = '';
+const onFin = (i: number) => [0, 1, 2, 3].some((k) => sw[i * 4 + k] > 0.2 && /Arm/.test(names[si[i * 4 + k]] ?? ''));
 const P = new Float32Array(n * 3), v = new THREE.Vector3();
 let label = '';
 const worstBy = new Map<string, number>();
@@ -37,9 +46,16 @@ const sample = () => {
     const [a, b, l] = edges[e];
     const s = Math.hypot(P[a * 3] - P[b * 3], P[a * 3 + 1] - P[b * 3 + 1], P[a * 3 + 2] - P[b * 3 + 2]) / l;
     if (s > worst[e]) worst[e] = s;
+    if ((s - 1) * l > grow) { grow = (s - 1) * l; growAt = `${label}, at y ${rest[a * 3 + 1].toFixed(3)}`; }
     m = Math.max(m, s);
   }
   worstBy.set(label, Math.max(worstBy.get(label) ?? 0, m));
+  for (const g of seamGroups) for (let k = 1; k < g.length; k++) {
+    const a = g[0], b = g[k];
+    const gap = Math.hypot(P[a * 3] - P[b * 3], P[a * 3 + 1] - P[b * 3 + 1], P[a * 3 + 2] - P[b * 3 + 2]);
+    if (g.some(onFin)) finGap = Math.max(finGap, gap);
+    else if (gap > seamGap) { seamGap = gap; seamAt = `${label}: ${g.map((i) => [0, 1, 2, 3].filter((k) => sw[i * 4 + k] > 0.05).map((k) => `${names[si[i * 4 + k]]} ${sw[i * 4 + k].toFixed(2)}`).join('+')).join(' | ')} at y ${rest[g[0] * 3 + 1].toFixed(3)}`; }
+  }
 };
 const step = (s: number) => { for (let t = 0; t < s; t += 1 / 60) { phys.step(1 / 60); r.syncMeshes(1 / 60, 1); if (Math.round(t * 60) % 3 === 0) sample(); } };
 label = 'standing'; step(1.5);
@@ -55,6 +71,9 @@ console.log(`${file ?? 'generated body'} (${weights}): worst edge stretch per ac
 console.log('  ' + [...worstBy].map(([k, s]) => `${k} ${s.toFixed(1)}×`).join(' · '));
 const order = [...worst.keys()].sort((a, b) => worst[b] - worst[a]);
 const bonesOf = (i: number) => [0, 1, 2, 3].filter((k) => sw[i * 4 + k] > 0.05).map((k) => `${names[si[i * 4 + k]]} ${sw[i * 4 + k].toFixed(2)}`).join(', ');
+console.log(`  most any one edge grows: ${(grow * 1000).toFixed(1)} mm (${((grow / r.dims.height) * 100).toFixed(1)}% of the height; ${growAt})`);
+console.log(`  seams: ${seamGroups.length} shared points, widest gap ${(seamGap * 1000).toFixed(1)} mm at the legs and body, ${(finGap * 1000).toFixed(1)} mm where fins come away from the body (capped)`);
+console.log(`  widest seam: ${seamAt}`);
 console.log(`  edges over 2× : ${[...worst].filter((s) => s > 2).length} of ${edges.length}; over 4×: ${[...worst].filter((s) => s > 4).length}`);
 for (const e of order.slice(0, 6)) {
   const [a, b] = edges[e];

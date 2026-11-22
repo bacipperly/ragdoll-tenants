@@ -347,6 +347,7 @@ export const JUMP = {
   tuck: 0.9, // extra knee bend in the air, rad
   kneesUp: 0.35, // hips swing the legs forward in the air, rad
   finsUp: 0.7, // fins fling up and out in the air, rad
+  kneesIn: 0.25, // the knees tuck in toward the middle in the air (cannonball), clear of the fins, rad
 }; // not `as const`: the sandbox tuning panel edits these live
 
 /**

@@ -4,7 +4,8 @@ import { BODY, BUTT, CARRY, CLUMSY, EMOTION, GAIT, GETUP, GRAVITY_COMP, HOVER, J
 import { GooHead, type GooContact } from './goo';
 import { Face, acquireSkin, releaseSkin } from './skin';
 import { bodyDims, type BodyDims } from './proportions';
-import { EXPRESSION_NAMES, MoodBlender, MOOD_NAMES, type ExpressionName, type MoodName } from './mood';
+import { EXPRESSION_NAMES, MoodBlender, MOOD_NAMES, type ExpressionName, type MoodName, type ReactionName } from './mood';
+import type { AccentSubject, Activity } from './accents';
 import { traitEffects, type TraitEffects } from './traits';
 import { recipeFromEditor, TENANT_YELLOW, type Recipe } from './recipe';
 import { OutfitPainter, parseOutfit, type Outfit } from './outfit';
@@ -243,7 +244,7 @@ export interface ActiveRagdollOptions {
   facing?: number;
 }
 
-export class ActiveRagdoll {
+export class ActiveRagdoll implements AccentSubject {
   /** Add to the scene. Everything inside is placed in world space every frame. */
   readonly group = new THREE.Group();
   readonly material: THREE.MeshStandardMaterial;
@@ -821,6 +822,39 @@ export class ActiveRagdoll {
   setExpression(e: ExpressionName | null): void { this.moods.expression = e; }
   get expression(): ExpressionName | null { return this.moods.expression; }
   static readonly expressionNames = EXPRESSION_NAMES;
+
+  // ---- What the expressive accents read (see accents.ts) ----
+  /** What it's busy doing, if anything: shown by an accent (music notes, a book…). */
+  activity: Activity | null = null;
+  /** The quick reaction showing most, if any is showing much. */
+  get reaction(): ReactionName | null {
+    let best: ReactionName | null = null, w = 0.3;
+    const r = this.reactions;
+    if (r.angry > w) { best = 'angry'; w = r.angry; }
+    if (r.surprised > w) { best = 'surprised'; w = r.surprised; }
+    if (r.teetering > w) { best = 'teetering'; w = r.teetering; }
+    if (r.focused > w) best = 'focused';
+    return best;
+  }
+  /** Ground speed while running (not strolling), else 0. */
+  get runSpeed(): number {
+    if (this.strolling || this.knockedOut) return 0;
+    const v = this.part('torso').body.linvel();
+    return Math.hypot(v.x, v.z);
+  }
+  get headRadius(): number { return this.dims.headR; }
+  headCenter(out: THREE.Vector3): THREE.Vector3 { return this.part('head').bone.getWorldPosition(out); }
+  bodyCenter(out: THREE.Vector3): THREE.Vector3 { return this.drawnMiddle(out); }
+  velocity(out: THREE.Vector3): THREE.Vector3 {
+    const v = this.part('torso').body.linvel();
+    return out.set(v.x, v.y, v.z);
+  }
+  /** A point on the face (drawn face units: head radius 0.2), in the world. */
+  facePoint(x: number, y: number, out: THREE.Vector3): THREE.Vector3 {
+    out.set(x, y, Math.sqrt(Math.max(0, BODY.headR * BODY.headR - x * x - y * y)));
+    return this.face.root.localToWorld(out);
+  }
+  faceQuaternion(out: THREE.Quaternion): THREE.Quaternion { return this.face.root.getWorldQuaternion(out); }
 
   /**
    * Holding something overhead: fins up, a little lean back. The caller attaches the

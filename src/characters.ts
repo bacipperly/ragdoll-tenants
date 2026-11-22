@@ -99,7 +99,7 @@ export class Crowd {
     for (const r of this.tenants) {
       if (r === this.selected || r.isKnockedOut) continue;
       let w = this.wander.get(r);
-      if (!w) { w = { target: randomSpot(), wait: Math.random() * 2, tried: 0, stroll: Math.random() < 0.5 }; this.wander.set(r, w); }
+      if (!w) { w = { target: randomSpot(), wait: Math.random() * 2, tried: 0, stroll: Math.random() < 0.85 }; this.wander.set(r, w); }
       r.middle(this.tmp);
       if (w.wait > 0) {
         w.wait -= dt;
@@ -114,7 +114,7 @@ export class Crowd {
         w.target = randomSpot();
         w.wait = 1 + Math.random() * 3;
         w.tried = 0;
-        w.stroll = Math.random() < 0.5;
+        w.stroll = Math.random() < 0.85; // mostly walking; running now and then (with speed lines)
         const roll = Math.random();
         if (roll < 0.25) r.playGesture(IDLE_GESTURES[Math.floor(Math.random() * IDLE_GESTURES.length)]);
         else if (roll < 0.33) r.setMood(MOOD_NAMES[Math.floor(Math.random() * (MOOD_NAMES.length - 1))]);

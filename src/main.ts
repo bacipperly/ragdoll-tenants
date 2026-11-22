@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { ActiveRagdoll, RagdollPhysics, RAPIER } from './ragdoll';
+import { Accents, ACCENT_KINDS, ACTIVITIES, ActiveRagdoll, RagdollPhysics, RAPIER, type Activity } from './ragdoll';
 import { bodyDims } from './ragdoll/proportions';
 import { TRAITS } from './ragdoll/config';
 import { ageName } from './ragdoll/traits';
@@ -41,6 +41,9 @@ fill.position.set(-5, 3, -4);
 const rim = new THREE.DirectionalLight('#ffffff', 0.9);
 rim.position.set(-2, 5, 7);
 scene.add(fill, rim);
+
+// Floating symbols that show feelings (hearts, Zs, a "?"…), for every tenant.
+const accents = new Accents(scene);
 const sc = sun.shadow.camera;
 sc.left = -6; sc.right = 6; sc.top = 6; sc.bottom = -6; sc.near = 0.5; sc.far = 30;
 scene.add(sun, sun.target);
@@ -227,6 +230,7 @@ window.addEventListener('keydown', (e) => {
       ragdoll.setExpression(i < names.length ? names[i] : null);
       break;
     }
+    case 'KeyI': accents.burst(ragdoll, 'bulb'); break; // an idea!
     case 'KeyC':
       useOrtho = !useOrtho;
       perspOrbit.enabled = !useOrtho;
@@ -325,6 +329,7 @@ function frame(now: number) {
   sun.position.set(focus.x + 4, 8, focus.z + 3);
   sun.target.position.copy(focus);
 
+  accents.update(Math.min(dt, 0.1), cam, crowd.tenants);
   renderer.render(scene, cam);
 
   const s = ragdoll.debugState();
@@ -336,7 +341,7 @@ function frame(now: number) {
     `Drag  orbit   Wheel zoom   Q/E  orbit   C  ${useOrtho ? 'close-up camera' : 'game (ortho) camera'}\n` +
     `Space jump                     B      ${ragdoll.showingSkeleton ? 'hide' : 'show'} skeleton\n` +
     `M     next mood                R      reset\n` +
-    `X     next expression\n` +
+    `X     next expression          I      idea (lightbulb)\n` +
     `G     pick up / throw          V      put down\n` +
     `1–0   ${KEY_GESTURES.join(' ')}\n\n` +
     `state     ${s.knockedOut ? 'KNOCKED OUT' : s.muscle < 1 ? 'recovering' : 'active'}\n` +
@@ -374,5 +379,17 @@ const thingsFolder = gui.addFolder('Things');
 thingsFolder.add({ reset: () => { carry.release(new THREE.Vector3()); things.reset(); } }, 'reset').name('↺ Put the things back');
 thingsFolder.close();
 
+// Expressive accents: what you're doing, and every accent on demand to look at.
+const accentFolder = gui.addFolder('Accents');
+const accentState = { on: true, activity: '' };
+accentFolder.add(accentState, 'on').name('show accents').onChange((v: boolean) => { accents.enabled = v; });
+accentFolder.add(accentState, 'activity', { '(nothing)': '', ...Object.fromEntries(ACTIVITIES.map((a) => [a, a])) })
+  .name('busy with').listen().onChange((v: string) => { ragdoll.activity = (v || null) as Activity | null; });
+setInterval(() => { accentState.activity = ragdoll.activity ?? ''; }, 250);
+const showOne = accentFolder.addFolder('Show one');
+for (const k of ACCENT_KINDS) showOne.add({ [k]: () => accents.burst(ragdoll, k) }, k);
+showOne.close();
+accentFolder.close();
+
 // Exposed for poking at from the console.
-Object.assign(window, { ragdoll, physics, perspOrbit, crowd, things, carry });
+Object.assign(window, { ragdoll, physics, perspOrbit, crowd, things, carry, accents });

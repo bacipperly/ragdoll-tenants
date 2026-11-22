@@ -81,6 +81,8 @@ export interface BodyModel {
   hip: number | null;
   rig: ModelRig | null;
   measures: ModelMeasures | null;
+  /** Vertices from here on are the caps' (see capParts). */
+  capFrom: number;
 }
 
 /** One physics capsule in the rest pose (vertical), and its bone. */
@@ -281,11 +283,47 @@ function classifyParts(pos: Float32Array, part: Int32Array): PartRole[] {
 }
 
 /**
+ * Triangulates a closed loop of points (an opening's outline, however long, bent or
+ * twisted) with the least total area: the classic hole-filling method. Every triangle
+ * joins points of the outline, so the patch spans the opening without spikes or gaps.
+ * Triangles come back as indices into the loop, wound in the loop's order.
+ */
+function minAreaFill(pts: [number, number, number][]): [number, number, number][] {
+  const n = pts.length;
+  const area = (i: number, j: number, k: number) => {
+    const a = pts[i], b = pts[j], c = pts[k];
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    return 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+  };
+  const W = new Float64Array(n * n), M = new Int32Array(n * n).fill(-1);
+  for (let len = 2; len < n; len++) {
+    for (let i = 0; i + len < n; i++) {
+      const j = i + len;
+      let best = Infinity, arg = -1;
+      for (let m = i + 1; m < j; m++) {
+        const w = W[i * n + m] + W[m * n + j] + area(i, m, j);
+        if (w < best) { best = w; arg = m; }
+      }
+      W[i * n + j] = best; M[i * n + j] = arg;
+    }
+  }
+  const out: [number, number, number][] = [];
+  const walk = (i: number, j: number) => {
+    if (j - i < 2) return;
+    const m = M[i * n + j];
+    out.push([i, m, j]);
+    walk(i, m); walk(m, j);
+  };
+  walk(0, n - 1);
+  return out;
+}
+
+/**
  * Closes each part's open edges. Segmenting cuts one mesh into pieces, leaving every
  * part open where it was cut from its neighbour; where a part comes away from another
  * as the body moves (a fin that hugged the side, lifting off it), you'd see into its
- * hollow inside. Each open loop is filled with a fan of triangles to its middle, facing
- * outward, so the part is a closed shell. Returns the mesh with the caps added.
+ * hollow inside. Each open loop is filled with the least-area patch spanning it, so the
+ * part is a closed shell. Returns the mesh with the caps added.
  */
 function capParts(pos: Float32Array, nrm: Float32Array, index: Uint32Array, part: Int32Array, roles: PartRole[]) {
   const P = Array.from(pos), N = Array.from(nrm), I = Array.from(index), Q = Array.from(part);
@@ -309,13 +347,6 @@ function capParts(pos: Float32Array, nrm: Float32Array, index: Uint32Array, part
   }
   const next = new Map<number, number>();
   for (const [k, c] of count) if (c === 1) { const [a, b] = dir.get(k)!; next.set(a, b); }
-  // Each part's middle, so every cap can be made to face away from it (outward).
-  const mid = new Map<number, [number, number, number, number]>();
-  for (let v = 0; v < id.length; v++) {
-    const m = mid.get(part[v]) ?? [0, 0, 0, 0];
-    m[0] += pos[v * 3]; m[1] += pos[v * 3 + 1]; m[2] += pos[v * 3 + 2]; m[3]++;
-    mid.set(part[v], m);
-  }
   const seen = new Set<number>();
   let capped = 0;
   for (const start of next.keys()) {
@@ -324,28 +355,22 @@ function capParts(pos: Float32Array, nrm: Float32Array, index: Uint32Array, part
     let v = start;
     while (!seen.has(v) && next.has(v) && loop.length < 5000) { seen.add(v); loop.push(v); v = next.get(v)!; }
     if (v !== start || loop.length < 3) continue; // not a clean loop: leave it
-    let cx = 0, cy = 0, cz = 0;
-    for (const u of loop) { cx += pos[u * 3]; cy += pos[u * 3 + 1]; cz += pos[u * 3 + 2]; }
-    cx /= loop.length; cy /= loop.length; cz /= loop.length;
-    // The cap's facing: reversing the loop's edges closes the shell outward.
-    let nx = 0, ny = 0, nz = 0;
-    for (let k = 0; k < loop.length; k++) {
-      const a = loop[k], b = loop[(k + 1) % loop.length];
-      const ax = pos[a * 3] - cx, ay = pos[a * 3 + 1] - cy, az = pos[a * 3 + 2] - cz;
-      const bx = pos[b * 3] - cx, by = pos[b * 3 + 1] - cy, bz = pos[b * 3 + 2] - cz;
-      nx -= ay * bz - az * by; ny -= az * bx - ax * bz; nz -= ax * by - ay * bx;
+    // Fill the opening (copies of its outline's points, so the cap gets its own shading),
+    // reversing the outline's direction so the cap closes the shell the other way round.
+    const tris = minAreaFill(loop.map((u) => [pos[u * 3], pos[u * 3 + 1], pos[u * 3 + 2]] as [number, number, number]));
+    const dup = loop.map((u) => { const d = P.length / 3; P.push(pos[u * 3], pos[u * 3 + 1], pos[u * 3 + 2]); N.push(0, 0, 0); Q.push(part[u]); return d; });
+    for (const [i0, i1, i2] of tris) {
+      const a0 = dup[i2], a1 = dup[i1], a2 = dup[i0];
+      I.push(a0, a1, a2);
+      // Shading from the cap's own triangles, as wound (lit right from either side).
+      const ux = P[a1 * 3] - P[a0 * 3], uy = P[a1 * 3 + 1] - P[a0 * 3 + 1], uz = P[a1 * 3 + 2] - P[a0 * 3 + 2];
+      const vx = P[a2 * 3] - P[a0 * 3], vy = P[a2 * 3 + 1] - P[a0 * 3 + 1], vz = P[a2 * 3 + 2] - P[a0 * 3 + 2];
+      const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+      for (const v of [a0, a1, a2]) { N[v * 3] += fx; N[v * 3 + 1] += fy; N[v * 3 + 2] += fz; }
     }
-    // Face away from the part's middle (flipping the fan if the loop ran the other way).
-    const pm = mid.get(part[start])!;
-    const flip = nx * (cx - pm[0] / pm[3]) + ny * (cy - pm[1] / pm[3]) + nz * (cz - pm[2] / pm[3]) < 0;
-    if (flip) { nx = -nx; ny = -ny; nz = -nz; }
-    const nl = Math.hypot(nx, ny, nz) || 1;
-    const centre = P.length / 3;
-    P.push(cx, cy, cz); N.push(nx / nl, ny / nl, nz / nl); Q.push(part[start]);
-    const dup = loop.map((u) => { const d = P.length / 3; P.push(pos[u * 3], pos[u * 3 + 1], pos[u * 3 + 2]); N.push(nx / nl, ny / nl, nz / nl); Q.push(part[u]); return d; });
-    for (let k = 0; k < loop.length; k++) {
-      if (flip) I.push(dup[k], dup[(k + 1) % loop.length], centre);
-      else I.push(dup[(k + 1) % loop.length], dup[k], centre);
+    for (const v of dup) {
+      const l = Math.hypot(N[v * 3], N[v * 3 + 1], N[v * 3 + 2]) || 1;
+      N[v * 3] /= l; N[v * 3 + 1] /= l; N[v * 3 + 2] /= l;
     }
     capped++;
   }
@@ -435,6 +460,7 @@ export function prepareBodyModel(name: string, positions: Float32Array, normals:
   const rig = extra.rig ?? null;
   return {
     name, positions: finalPos, normals: finalNrm, index: finalIndex, landmarks, found, armAngle, legAngle, head: settings.head ?? 'goo',
+    capFrom: pos.length / 3,
     weights: settings.weights === 'rig' && rig ? 'rig' : 'ours', part: finalPart, roles, hip, rig: rig && finalPos.length > pos.length ? extendRig(rig, (finalPos.length - pos.length) / 3, finalPart!, part!) : rig, measures,
   };
 }
@@ -616,7 +642,7 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
   };
   const segByName = new Map(segs.map((g, i) => [g.name, i]));
   // Every vertex's weight on every bone, worked out first so the seams can be welded.
-  const S = segs.length, allW = new Float32Array(count * S);
+  const S = segs.length, allW = new Float32Array(count * S), tmpW = new Float32Array(S);
   type LimbRole = 'finL' | 'finR' | 'legL' | 'legR';
   /**
    * A limb's weights at (x, y), as a rig would have them: the upper bone down to the
@@ -638,9 +664,29 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
     // sides) can't be kept shut without dragging the body along, so it bends from the
     // joint and its cut edges are capped instead (see capHoles).
     const depth = seamDepth.get(limb) ?? -Infinity;
-    const from = depth > -Infinity && depth < 0.6 * upperLen ? depth : -0.4 * span;
-    const lower = THREE.MathUtils.smoothstep(t, Math.max(upperLen, from + span) - 0.6 * span, Math.max(upperLen, from + span) + 0.6 * span);
-    const body = 1 - THREE.MathUtils.smoothstep(t, from, from + 1.1 * span);
+    const sleeve = depth > -Infinity && depth < 0.6 * upperLen;
+    let lower: number, body: number;
+    if (sleeve) {
+      // A short hand-over just below the seam, then the upper bone has the limb down to
+      // the joint and the lower bone past it, each its fair share. (Spread wider, the
+      // body keeps most of a short leg and only its foot swings, bending backward like a
+      // bird's.)
+      // The hand-over straddles the seam (the hip gives a little too, as a real one does),
+      // and the torso round the seam follows the same rule (see the torso, below), so
+      // both sides agree on the seam itself and it stays shut.
+      body = 1 - THREE.MathUtils.smoothstep(t, depth - 0.5 * upperLen, depth + 0.5 * upperLen);
+      // Between the legs, at the crotch, the body holds still: pulled two ways by
+      // scissoring thighs it would tear. The swing shows on the outside of the hip.
+      if (!fin) {
+        const inner = 1 - THREE.MathUtils.smoothstep(x * lb.side, 0.1 * Math.abs(lb.px), 0.75 * Math.abs(lb.px));
+        body += (1 - body) * inner * (1 - THREE.MathUtils.smoothstep(t, depth, depth + upperLen));
+      }
+      const knee = Math.max(upperLen, depth + 0.6 * upperLen);
+      lower = THREE.MathUtils.smoothstep(t, knee - 0.35 * upperLen, knee + 0.35 * upperLen);
+    } else {
+      lower = THREE.MathUtils.smoothstep(t, upperLen - 0.6 * span, upperLen + 0.6 * span);
+      body = 1 - THREE.MathUtils.smoothstep(t, -0.4 * span, 0.7 * span);
+    }
     out.fill(0);
     out[low] = (1 - body) * lower; out[up] = (1 - body) * (1 - lower); out[root] = body;
   };
@@ -717,6 +763,19 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
       const chest = THREE.MathUtils.smoothstep(y, D.spineY - band, D.spineY + band);
       w.fill(0);
       w[segByName.get('chest')!] = chest; w[segByName.get('torso')!] = 1 - chest;
+      // Round a leg's ring seam (the hip), blend into that leg's own weights, all the
+      // way on the seam itself. (Not round the fins: fused along the sides, they'd drag
+      // the body's flanks out of shape; those seams are capped and come apart instead.)
+      for (const [limb, pts] of seams) {
+        const depth = seamDepth.get(limb) ?? -Infinity, upperLen = limb.startsWith('fin') ? D.upperArmLen : D.thighLen;
+        if (!(depth > -Infinity && depth < 0.6 * upperLen)) continue;
+        let best = Infinity;
+        for (let k = 0; k < pts.length; k += 3) best = Math.min(best, Math.hypot(x - pts[k], y - pts[k + 1], z - pts[k + 2]));
+        const near = 1 - THREE.MathUtils.smoothstep(best, 0, 0.8 * upperLen);
+        if (near <= 0) continue;
+        chainInto(limb, x, y, tmpW);
+        for (let s2 = 0; s2 < S; s2++) w[s2] += (tmpW[s2] - w[s2]) * near;
+      }
       sum = 1;
     }
     if (m.weights === 'rig' && m.rig) {
@@ -812,6 +871,10 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
   geo.setAttribute('clothB', new THREE.BufferAttribute(clothB, 4));
   geo.setIndex(new THREE.BufferAttribute(index, 1));
   geo.computeBoundingSphere();
+  // Where the caps' vertices start (for checks: caps are inside the body, mostly).
+  let capFrom = count;
+  for (let i = m.capFrom; i < remap.length; i++) if (remap[i] >= 0) capFrom = Math.min(capFrom, remap[i]);
+  geo.userData.capFrom = capFrom;
   return geo;
 }
 

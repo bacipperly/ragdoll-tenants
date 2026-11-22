@@ -13,6 +13,7 @@ import type GUI from 'lil-gui';
 import type { ActiveRagdoll, RagdollPhysics, Recipe } from './ragdoll';
 import { GLASSES_STYLES, HAT_STYLES, SHIRT_PATTERNS, NO_OUTFIT, TATTOO_SHAPES, TATTOO_SPOTS, loadIntoEditor, parseRecipe, randomOutfit, randomRecipe, recipeFromEditor, type GlassesStyle, type HatStyle, type Outfit, type ShirtPattern } from './ragdoll';
 import { GESTURE_NAMES, type GestureName } from './ragdoll/gestures';
+import { HAIR_ACCENTS, HAIR_COLORS, HAIR_PARTS, HAIR_STYLES, HAIR_TEXTURES, type HairAccent, type HairPart, type HairStyle, type HairTexture } from './ragdoll/hair';
 import { MOOD_NAMES } from './ragdoll/mood';
 import { pasteBox } from './tuner';
 
@@ -300,6 +301,8 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
     pacifier: false, pacifierColor: '#8ecae6',
     whiskers: false, whiskersColor: '#f4f4f4', mustache: true, brows: true,
     backpack: false, backpackColor: '#3a86ff', bag: false, bagColor: '#7f5539', cane: false, caneColor: '#7f5539',
+    hair: false, hairStyle: 'short' as HairStyle, hairColor: HAIR_COLORS.brown as string, texture: 'straight' as HairTexture,
+    part: 'left' as HairPart, accent: 'none' as HairAccent, accentColor: '#f48fb1', fade: false,
     tat1: false, tat1Shape: 'heart', tat1Spot: 'finL', tat1Color: '#2b2d42', tat1Size: 0.5,
     tat2: false, tat2Shape: 'star', tat2Spot: 'belly', tat2Color: '#2b2d42', tat2Size: 0.5,
   };
@@ -320,6 +323,7 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
     backpack: w.backpack ? { color: w.backpackColor } : null,
     bag: w.bag ? { color: w.bagColor } : null,
     cane: w.cane ? { color: w.caneColor } : null,
+    hair: w.hair ? { style: w.hairStyle, color: w.hairColor, texture: w.texture, part: w.part, accent: w.accent, accentColor: w.accentColor, fade: w.fade } : null,
     tattoos: [
       ...(w.tat1 ? [{ shape: w.tat1Shape, spot: w.tat1Spot, color: w.tat1Color, size: w.tat1Size }] : []),
       ...(w.tat2 ? [{ shape: w.tat2Shape, spot: w.tat2Spot, color: w.tat2Color, size: w.tat2Size }] : []),
@@ -344,6 +348,7 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
     w.backpack = !!o.backpack; if (o.backpack) w.backpackColor = o.backpack.color;
     w.bag = !!o.bag; if (o.bag) w.bagColor = o.bag.color;
     w.cane = !!o.cane; if (o.cane) w.caneColor = o.cane.color;
+    w.hair = !!o.hair; if (o.hair) { w.hairStyle = o.hair.style; w.hairColor = o.hair.color; w.texture = o.hair.texture; w.part = o.hair.part; w.accent = o.hair.accent; w.accentColor = o.hair.accentColor; w.fade = o.hair.fade; }
     const [t1, t2] = o.tattoos;
     w.tat1 = !!t1; if (t1) { w.tat1Shape = t1.shape; w.tat1Spot = t1.spot; w.tat1Color = t1.color; w.tat1Size = t1.size; }
     w.tat2 = !!t2; if (t2) { w.tat2Shape = t2.shape; w.tat2Spot = t2.spot; w.tat2Color = t2.color; w.tat2Size = t2.size; }
@@ -405,6 +410,19 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
     g.add(w, 'hatStyle', HAT_STYLES).name('style');
     g.addColor(w, 'hatColor').name('colour');
     g.add(w, 'backwards').name('worn backwards (caps)');
+  });
+  group('Hair', (g) => {
+    g.add(w, 'hair').name('has hair');
+    g.add(w, 'hairStyle', HAIR_STYLES).name('style');
+    g.add(w, 'texture', HAIR_TEXTURES).name('texture');
+    g.addColor(w, 'hairColor').name('colour');
+    const swatches = { hairColor: '' };
+    g.add(swatches, 'hairColor', { '(pick a natural colour)': '', ...Object.fromEntries(Object.entries(HAIR_COLORS).map(([k, v]) => [k, v])) })
+      .name('…or a shade').onChange((v: string) => { if (v) { w.hairColor = v; apply(); sync(); } });
+    g.add(w, 'part', HAIR_PARTS).name('part');
+    g.add(w, 'accent', HAIR_ACCENTS).name('highlights / streak');
+    g.addColor(w, 'accentColor').name('accent colour');
+    g.add(w, 'fade').name('faded sides');
   });
   group('Accessories', (g) => {
     g.add(w, 'glasses').name('glasses');

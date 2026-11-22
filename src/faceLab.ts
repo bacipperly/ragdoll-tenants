@@ -1,6 +1,8 @@
 /*
  * Face lab (dev only, face-lab.html): tenant heads seen face-on, for working on the face.
  *   #library      the expression library (the character sheet's faces), in the sheet's order
+ *   #hair         every hair style, turned three-quarters (#hair-back: from behind;
+ *                 #hair-textures: the hanging styles in each texture)
  *   #moods        every mood and reaction, plus asleep and mid-blink
  *   #transitions  strips from calm into each expression, to see how pieces appear and go
  *   #live         one big head drifting through the moods and blinking, as in the game
@@ -10,6 +12,7 @@ import { Face } from './ragdoll/skin';
 import { BODY } from './ragdoll/config';
 import { EXPRESSIONS, EXPRESSION_NAMES, MOODS, NEUTRAL, REACTIONS, LETTERS, expressionLabel, type Letters, type Word } from './ragdoll/mood';
 import { TENANT_YELLOW } from './ragdoll/recipe';
+import { Hair, HAIR_STYLES, HAIR_TEXTURES, type HairSpec } from './ragdoll/hair';
 import type { FaceShape } from './ragdoll/proportions';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -139,6 +142,26 @@ function show(page: string): void {
       items.push({ label: s === 0 ? 'awake 1 → 0' : `${(1 - t).toFixed(2)}`, l: NEUTRAL, awake: 1 - t });
     }
     grid(items, steps);
+  } else if (page.startsWith('hair')) {
+    const back = page === 'hair-back', textures = page === 'hair-textures';
+    const colors = ['#4a2c1d', '#1f1a17', '#e8c35a', '#b8392b', '#7a4a2a', '#8e5cf0', '#a8743f', '#2bb3a3'];
+    const specs: { label: string; spec: HairSpec }[] = textures
+      ? (['long', 'medium', 'bob', 'ponytail'] as const).flatMap((style, i) => HAIR_TEXTURES.map((texture) => ({
+        label: `${style} · ${texture}`,
+        spec: { style, texture, color: colors[i], part: 'left' as const, accent: 'none' as const, accentColor: '#ffffff', fade: false },
+      })))
+      : HAIR_STYLES.map((style, i) => ({
+        label: style,
+        spec: { style, texture: style === 'afro' ? 'coily' as const : 'straight' as const, color: colors[i % colors.length], part: 'left' as const,
+          accent: i % 7 === 3 ? 'streak' as const : i % 7 === 5 ? 'highlights' as const : 'none' as const, accentColor: '#f48fb1', fade: style === 'buzz' },
+      }));
+    grid(specs.map((x) => ({ label: x.label, l: { ...NEUTRAL } })), textures ? 4 : 6);
+    heads.forEach((h, k) => {
+      const hair = new Hair(specs[k].spec, R, null);
+      h.group.add(hair.mesh);
+      h.group.rotation.y = back ? Math.PI - 0.5 : 0.55;
+      h.group.scale.setScalar(0.78);
+    });
   } else if (page === 'library') {
     grid(EXPRESSION_NAMES.map((n) => ({ label: expressionLabel(n), l: letters(EXPRESSIONS[n] as Word) })), 8);
   } else if (page === 'live') {

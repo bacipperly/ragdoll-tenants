@@ -56,5 +56,10 @@ export function dressForStage(o: Outfit, stage: LifeStage): Outfit {
   for (const k of ACCESSORY_KEYS) (out as unknown as Record<string, unknown>)[k] = null;
   if (out.hat?.backwards) out.hat = null; // a teen's cap goes when they grow up
   if (out.pants && out.pants.legs === 0 && out.pants.color === '#ffffff') out.pants = null; // and a baby's nappy
+  // Elders go white: their hair whitens, or they get an elder's tufts.
+  if (stage.name === 'elderly') {
+    out.hair = out.hair ? { ...out.hair, color: '#f2f2f2', accent: 'none' }
+      : { style: 'tufts', color: '#f2f2f2', texture: 'straight', part: 'left', accent: 'none', accentColor: '#f2f2f2', fade: false };
+  }
   return { ...out, ...structuredClone(stage.wear) };
 }

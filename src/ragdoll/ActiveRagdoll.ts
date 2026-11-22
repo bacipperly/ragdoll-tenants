@@ -8,6 +8,7 @@ import { EXPRESSION_NAMES, MoodBlender, MOOD_NAMES, type ExpressionName, type Mo
 import type { AccentSubject, Activity } from './accents';
 import { ACCESSORY_KEYS } from './outfit';
 import { Accessories } from './accessories';
+import { Hair } from './hair';
 import { traitEffects, type TraitEffects } from './traits';
 import { recipeFromEditor, TENANT_YELLOW, type Recipe } from './recipe';
 import { OutfitPainter, parseOutfit, type Outfit } from './outfit';
@@ -459,6 +460,10 @@ export class ActiveRagdoll implements AccentSubject {
   private skirt: Skirt | null = null;
   /** Glasses, bow, backpack, cane… (see accessories.ts). */
   private accessories: Accessories | null = null;
+  /** Its hair (see hair.ts), and what it was built for (style, colours, under a hat or not). */
+  private hair: Hair | null = null;
+  private hairBuilt = '';
+  private hairUnderHat = false;
   private hood: THREE.Mesh | null = null;
   private legBones: LegBones[] = [];
   private readonly upAxis = new THREE.Vector3();
@@ -581,6 +586,7 @@ export class ActiveRagdoll implements AccentSubject {
     this.face.pinTo(this.goo, this.dims.headScale);
     this.part('head').bone.add(this.face.root);
     this.wearHat();
+    this.wearHair();
     this.legBones = [
       { thigh: this.part('thighL').bone, shin: this.part('shinL').bone },
       { thigh: this.part('thighR').bone, shin: this.part('shinR').bone },
@@ -684,10 +690,11 @@ export class ActiveRagdoll implements AccentSubject {
     this.painter.set(o);
     if (JSON.stringify([o.skirt, o.hoodie]) !== meshesBefore) this.wearGarments();
     if (ACCESSORY_KEYS.some((k) => JSON.stringify(o[k]) !== JSON.stringify(before[k]))) this.wearAccessories();
-    if (JSON.stringify(this.headwear(o)) === hatBefore && (this.hat || !this.headwear(o))) return;
+    if (JSON.stringify(this.headwear(o)) === hatBefore && (this.hat || !this.headwear(o))) { this.wearHair(); return; }
     this.hat?.dispose(this.world);
     this.hat = null;
     this.wearHat();
+    this.wearHair();
   }
 
   /** What's on its head: a hoodie's hood when it's up (instead of any hat), else the hat. */
@@ -700,6 +707,25 @@ export class ActiveRagdoll implements AccentSubject {
     if (!h) return;
     this.hat = new Hat(h.style, h.color, this.dims.headR, this.goo, h.backwards);
     this.hat.putOn(this.world, this.part('head').bone);
+  }
+
+  /**
+   * The hair: (re)built when the hair changes, or a hat goes on or comes off (under a
+   * hat only what shows is built; under a raised hood, none).
+   */
+  private wearHair(): void {
+    const o = this.recipe.outfit;
+    this.hairUnderHat = !!this.hat && !this.hat.isLoose && this.hat.style !== 'hood';
+    const key = !o.hair || o.hoodie?.hoodUp ? '' : `${JSON.stringify(o.hair)}|${this.hairUnderHat}|${this.recipe.color}`;
+    if (key === this.hairBuilt) return;
+    this.hairBuilt = key;
+    this.hair?.dispose();
+    this.hair = null;
+    if (!key) return;
+    const h = new Hair(o.hair!, this.dims.headR, this.goo, this.hairUnderHat, this.recipe.color);
+    if (h.empty) { h.dispose(); return; }
+    this.hair = h;
+    this.part('head').bone.add(h.mesh);
   }
 
   /** The accessories: (re)built from the outfit. */
@@ -1434,10 +1460,13 @@ export class ActiveRagdoll implements AccentSubject {
     }
     if (this.hat?.isLoose) this.hat.sync(dt, alpha);
     this.accessories?.update(this.groundY); // the cane stays upright at any distance
+    // A hat knocked off (or put back on) shows (or hides) the hair under it.
+    if (this.recipe.outfit.hair && this.hairUnderHat !== (!!this.hat && !this.hat.isLoose && this.hat.style !== 'hood')) this.wearHair();
     if (this.detail === 'full') {
       this.goo.update(dt, this.part('head').bone.quaternion, this.headAccel, this.gooContact, this.traits.squish, this.muscle * this.muscle);
       this.face.setExpression(this.faceAwake, this.moods.letters, Math.max(this.blink, this.gestures.extras.eyesShut)); // also rides it on the goo
       if (this.hat && !this.hat.isLoose) this.hat.conform();
+      this.hair?.update(dt, this.part('head').bone);
       this.skirt?.update(dt, this.torso.bone, this.legBones);
     } else if (this.detail === 'far' && ++this.farFrames >= FAR_FACE_EVERY) {
       // Too small to see a wobble or read a face: the goo rests, and the face is redrawn
@@ -1553,6 +1582,7 @@ export class ActiveRagdoll implements AccentSubject {
     this.hat?.dispose(this.world);
     this.skirt?.dispose();
     this.accessories?.dispose();
+    this.hair?.dispose();
     disposeMesh(this.hood);
     releaseSkin(this.dims);
     this.group.removeFromParent();

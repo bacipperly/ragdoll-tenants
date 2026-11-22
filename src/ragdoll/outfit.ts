@@ -17,6 +17,8 @@ import type { BodyDims } from './proportions';
 
 export type HatStyle = 'beanie' | 'cap' | 'tophat';
 export const HAT_STYLES: HatStyle[] = ['beanie', 'cap', 'tophat'];
+import { HAIR_ACCENTS, HAIR_COLORS, HAIR_PARTS, HAIR_STYLES, HAIR_TEXTURES, type HairSpec, type HairStyle } from './hair';
+
 export type GlassesStyle = 'round' | 'square';
 export const GLASSES_STYLES: GlassesStyle[] = ['round', 'square'];
 /** The outfit's accessories (each null when not worn). */
@@ -64,6 +66,8 @@ export interface Outfit {
   bag: { color: string } | null;
   /** A walking cane, in one fin. */
   cane: { color: string } | null;
+  /** Hair (see hair.ts). The plain character is bald; this is a look you add. */
+  hair: HairSpec | null;
   /** Up to two. size: 0 small … 1 big. */
   tattoos: { shape: TattooShape; spot: TattooSpot; color: string; size: number }[];
 }
@@ -71,7 +75,7 @@ export interface Outfit {
 export const NO_OUTFIT: Outfit = {
   shirt: null, hoodie: null, skirt: null, pants: null, socks: null, shoes: null, gloves: null, hat: null,
   glasses: null, bow: null, headphones: null, pacifier: null, whiskers: null, backpack: null, bag: null, cane: null,
-  tattoos: [],
+  hair: null, tattoos: [],
 };
 export const MAX_TATTOOS = 2;
 
@@ -88,7 +92,7 @@ export function parseOutfit(data: unknown): Outfit {
   const d = obj(data);
   if (!d) return structuredClone(NO_OUTFIT);
   const s = obj(d.shirt), hd = obj(d.hoodie), sk = obj(d.skirt), p = obj(d.pants), so = obj(d.socks), sh = obj(d.shoes), g = obj(d.gloves), h = obj(d.hat);
-  const gl = obj(d.glasses), wh = obj(d.whiskers);
+  const gl = obj(d.glasses), wh = obj(d.whiskers), hr = obj(d.hair);
   const just = (v: unknown, fallback: string) => { const o = obj(v); return o && { color: col(o.color, fallback) }; };
   return {
     shirt: s && {
@@ -113,6 +117,11 @@ export function parseOutfit(data: unknown): Outfit {
     backpack: just(d.backpack, '#3a86ff'),
     bag: just(d.bag, '#7f5539'),
     cane: just(d.cane, '#7f5539'),
+    hair: hr && {
+      style: pick(hr.style, HAIR_STYLES, 'short'), color: col(hr.color, HAIR_COLORS.brown), texture: pick(hr.texture, HAIR_TEXTURES, 'straight'),
+      part: pick(hr.part, HAIR_PARTS, 'left'), accent: pick(hr.accent, HAIR_ACCENTS, 'none'), accentColor: col(hr.accentColor, '#f48fb1'),
+      fade: hr.fade === true,
+    },
     tattoos: (Array.isArray(d.tattoos) ? d.tattoos : []).slice(0, MAX_TATTOOS).map(obj).filter((t) => t !== null).map((t) => ({
       shape: pick(t.shape, TATTOO_SHAPES, 'heart'), spot: pick(t.spot, TATTOO_SPOTS, 'finL'),
       color: col(t.color, '#2b2d42'), size: num(t.size, 0.5),
@@ -155,7 +164,34 @@ export function randomOutfit(rand: () => number = Math.random, age = 0.5): Outfi
     gloves: r() < 0.1 ? { color: c(), length: between(0, 0.8) } : null,
     hat: r() < 0.35 ? { style: HAT_STYLES[Math.floor(r() * HAT_STYLES.length)], color: c(), backwards: age > 0.25 && age < 0.5 && r() < 0.5 } : null,
     ...randomAccessories(r, c, age),
+    hair: randomHair(r, age),
     tattoos,
+  };
+}
+
+/**
+ * Hair for a random tenant: most of the cast stay bald like the plain character; the
+ * rest get a style and colour that suit their age (grey and white later on, an elder's
+ * tufts, a baby's single curl now and then), with a bright colour once in a while.
+ */
+function randomHair(r: () => number, age: number): HairSpec | null {
+  const baby = age < 0.07, elder = age >= 0.86, older = age >= 0.63;
+  if (r() > (baby ? 0.2 : elder ? 0.55 : 0.45)) return null;
+  const C = HAIR_COLORS;
+  const natural = [C.black, C.black, C.darkBrown, C.darkBrown, C.brown, C.brown, C.lightBrown, C.blonde, C.red, C.auburn, C.orange, C.platinum];
+  const bright = [C.pink, C.purple, C.blue, C.teal, C.green];
+  const color = elder ? (r() < 0.6 ? C.white : C.gray) : older && r() < 0.4 ? C.gray : r() < 0.1 ? bright[Math.floor(r() * bright.length)] : natural[Math.floor(r() * natural.length)];
+  const styles: HairStyle[] = baby ? ['crop', 'curly', 'buzz'] : elder ? ['tufts', 'tufts', 'short', 'buzz', 'bun', 'curly', 'slicked']
+    : (HAIR_STYLES.filter((x) => x !== 'tufts') as HairStyle[]);
+  const style = styles[Math.floor(r() * styles.length)];
+  const accentRoll = r();
+  return {
+    style, color,
+    texture: style === 'afro' ? (r() < 0.6 ? 'coily' : 'curly') : HAIR_TEXTURES[Math.floor(r() * 4 * r())] ?? 'straight',
+    part: HAIR_PARTS[Math.floor(r() * 3)],
+    accent: accentRoll < 0.08 ? 'streak' : accentRoll < 0.18 ? 'highlights' : 'none',
+    accentColor: r() < 0.5 ? bright[Math.floor(r() * bright.length)] : C.blonde,
+    fade: (style === 'buzz' || style === 'crop' || style === 'short') && r() < 0.3,
   };
 }
 

@@ -11,6 +11,10 @@ export interface GlbInfo {
   index: Uint32Array;
   meshes: number;
   primitives: number;
+  /** Each vertex's part (which mesh it came from), when there's more than one. */
+  part?: Int32Array;
+  /** The model's own rig, when its meshes are skinned. */
+  rig?: { joints: Uint16Array; weights: Float32Array; names: string[] };
 }
 
 const COMPONENTS: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
@@ -36,20 +40,22 @@ export function readGlb(file: string): GlbInfo {
     const base = (view.byteOffset ?? 0) + (acc.byteOffset ?? 0);
     const size = { 5126: 4, 5125: 4, 5123: 2, 5121: 1 }[acc.componentType as 5126]!;
     const stride = view.byteStride ?? n * size;
-    const out = acc.componentType === 5126 ? new Float32Array(count * n) : new Uint32Array(count * n);
+    const out = acc.componentType === 5126 || acc.normalized ? new Float32Array(count * n) : new Uint32Array(count * n);
+    const norm = acc.normalized ? (acc.componentType === 5121 ? 255 : acc.componentType === 5123 ? 65535 : 1) : 1;
     for (let i = 0; i < count; i++) {
       for (let k = 0; k < n; k++) {
         const at = base + i * stride + k * size;
         out[i * n + k] = acc.componentType === 5126 ? bin!.readFloatLE(at)
           : acc.componentType === 5125 ? bin!.readUInt32LE(at)
-          : acc.componentType === 5123 ? bin!.readUInt16LE(at) : bin!.readUInt8(at);
+          : (acc.componentType === 5123 ? bin!.readUInt16LE(at) : bin!.readUInt8(at)) / norm;
       }
     }
     return out;
   };
 
-  const pos: number[] = [], nrm: number[] = [], idx: number[] = [];
-  let meshes = 0, primitives = 0;
+  const pos: number[] = [], nrm: number[] = [], idx: number[] = [], part: number[] = [];
+  const joints: number[] = [], weights: number[] = [], names: string[] = [];
+  let meshes = 0, primitives = 0, rigged = true;
   const v = new THREE.Vector3(), nm = new THREE.Matrix3();
   const visit = (nodeIndex: number, parent: THREE.Matrix4) => {
     const node = json.nodes[nodeIndex];
@@ -66,6 +72,18 @@ export function readGlb(file: string): GlbInfo {
         const p = read(prim.attributes.POSITION) as Float32Array;
         const n = prim.attributes.NORMAL !== undefined ? read(prim.attributes.NORMAL) as Float32Array : null;
         const base = pos.length / 3;
+        for (let i = 0; i < p.length / 3; i++) part.push(meshes - 1);
+        // The rig: joints are indices into the skin's joint list, which names nodes.
+        if (node.skin !== undefined && prim.attributes.JOINTS_0 !== undefined && prim.attributes.WEIGHTS_0 !== undefined) {
+          const sj = json.skins[node.skin].joints as number[];
+          const J = read(prim.attributes.JOINTS_0), W = read(prim.attributes.WEIGHTS_0);
+          for (let i = 0; i < J.length; i++) {
+            const nm = json.nodes[sj[J[i]]]?.name ?? '';
+            let j = names.indexOf(nm);
+            if (j < 0) { j = names.length; names.push(nm); }
+            joints.push(j); weights.push(W[i]);
+          }
+        } else rigged = false;
         for (let i = 0; i < p.length; i += 3) {
           v.set(p[i], p[i + 1], p[i + 2]).applyMatrix4(world); pos.push(v.x, v.y, v.z);
           if (n) { v.set(n[i], n[i + 1], n[i + 2]).applyMatrix3(nm).normalize(); nrm.push(v.x, v.y, v.z); } else nrm.push(0, 0, 0);
@@ -86,7 +104,11 @@ export function readGlb(file: string): GlbInfo {
     const cn = g.attributes.normal.array;
     for (let i = 0; i < nrm.length; i++) if (nrm[i - (i % 3)] === 0 && nrm[i - (i % 3) + 1] === 0 && nrm[i - (i % 3) + 2] === 0) nrm[i] = cn[i];
   }
-  return { json, positions: Float32Array.from(pos), normals: Float32Array.from(nrm), index: Uint32Array.from(idx), meshes, primitives };
+  return {
+    json, positions: Float32Array.from(pos), normals: Float32Array.from(nrm), index: Uint32Array.from(idx), meshes, primitives,
+    part: meshes > 1 ? Int32Array.from(part) : undefined,
+    rig: rigged && names.length ? { joints: Uint16Array.from(joints), weights: Float32Array.from(weights), names } : undefined,
+  };
 }
 
 /** Writes one mesh (positions, normals, triangles) as a .glb. */

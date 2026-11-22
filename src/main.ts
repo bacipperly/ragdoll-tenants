@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Accents, ACCENT_KINDS, ACTIVITIES, ActiveRagdoll, RagdollPhysics, RAPIER, loadBodyModel, setBodyModel, type Activity } from './ragdoll';
+import { Accents, ACCENT_KINDS, ACTIVITIES, ActiveRagdoll, RagdollPhysics, RAPIER, loadBodyModel, setBodyModel, calibrate, setProportionCalibration, type Activity } from './ragdoll';
 import { bodyDims } from './ragdoll/proportions';
 import { TRAITS } from './ragdoll/config';
 import { ageName } from './ragdoll/traits';
@@ -103,11 +103,17 @@ const MODEL = new URLSearchParams(location.search).get('model');
 let modelNote = '';
 if (MODEL && MODEL !== 'procedural') {
   try {
-    const m = await loadBodyModel(`./models/${MODEL}.glb`);
+    // &weights=rig uses the model's own rig weights instead of ours (to compare).
+    const weights = new URLSearchParams(location.search).get('weights');
+    const m = await loadBodyModel(`./models/${MODEL}.glb`, weights === 'rig' || weights === 'ours' ? { weights } : {});
     setBodyModel(m);
+    // Its proportions become ours (head size and all), so it fits without stretching.
+    const cal = calibrate(m);
+    if (cal) setProportionCalibration(cal);
     const guessed = Object.entries(m.found).filter(([, how]) => how === 'guessed').map(([k]) => k);
-    modelNote = `body      ${MODEL}.glb (${m.index.length / 3} triangles${guessed.length ? `, guessed: ${guessed.join(', ')}` : ''})\n`;
-    console.info('[body model]', m.name, { landmarks: m.landmarks, found: m.found, armAngleDeg: (m.armAngle * 57.3).toFixed(1), legAngleDeg: (m.legAngle * 57.3).toFixed(1) });
+    modelNote = `body      ${MODEL}.glb (${m.index.length / 3} triangles${m.part ? `, ${m.roles.length} parts` : ''}, ${m.weights === 'rig' ? 'its own rig weights' : 'our weights'}`
+      + `${cal ? ', proportions from the model' : ''}${guessed.length ? `, guessed: ${guessed.join(', ')}` : ''})\n`;
+    console.info('[body model]', m.name, { landmarks: m.landmarks, found: m.found, roles: m.roles, armAngleDeg: (m.armAngle * 57.3).toFixed(1), legAngleDeg: (m.legAngle * 57.3).toFixed(1), calibration: cal });
   } catch (err) {
     modelNote = `body      couldn't load models/${MODEL}.glb, using the generated body\n`;
     console.warn('[body model]', err);

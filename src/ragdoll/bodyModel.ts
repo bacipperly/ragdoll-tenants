@@ -23,7 +23,8 @@
  * The model's textures and colours are ignored: the tenant's material colours it.
  */
 import * as THREE from 'three';
-import type { BodyDims } from './proportions';
+import { bodyDims, setProportionCalibration, type BodyDims } from './proportions';
+import { PROPORTIONS } from './config';
 
 export interface Landmarks { feet: number; crotch: number; shoulder: number; neck: number; top: number }
 
@@ -37,6 +38,27 @@ export interface BodyModelSettings {
   /** Override the detected limb angles (degrees out from hanging straight down). */
   armAngle?: number;
   legAngle?: number;
+  /**
+   * Bone weights: 'ours' (by distance to our capsules, kept to each part's own bones
+   * when the model comes in parts) or 'rig' (the model's own rig, its bones mapped
+   * onto ours by name). Default 'ours'.
+   */
+  weights?: 'ours' | 'rig';
+}
+
+/** What each separate part of a segmented model is. */
+export type PartRole = 'head' | 'face' | 'torso' | 'finL' | 'finR' | 'legL' | 'legR';
+
+/** A model's own rig, per vertex: up to 4 joints (indices into names) and weights. */
+export interface ModelRig { joints: Uint16Array; weights: Float32Array; names: string[] }
+
+/** The model's measurements (its own units), for fitting our proportions to it. */
+export interface ModelMeasures {
+  height: number;
+  headRadius: number; headWidth: number; headHeight: number;
+  hip: number; torsoHalfWidth: number;
+  finLength: number; finHalfWidth: number; finRootX: number;
+  legHalfWidth: number; legX: number;
 }
 
 export interface BodyModel {
@@ -51,6 +73,14 @@ export interface BodyModel {
   armAngle: number;
   legAngle: number;
   head: 'goo' | 'model';
+  weights: 'ours' | 'rig';
+  /** Segmented models: each vertex's part, and what each part is. */
+  part: Int32Array | null;
+  roles: PartRole[];
+  /** Height of the hip joints (the tops of the legs), when the legs are separate parts. */
+  hip: number | null;
+  rig: ModelRig | null;
+  measures: ModelMeasures | null;
 }
 
 /** One physics capsule in the rest pose (vertical), and its bone. */
@@ -192,8 +222,67 @@ function finAngle(S: Slice[], L: Landmarks, tol: number): number {
   return Math.max(0, Math.atan2(tip[0] - px, L.shoulder - tip[1]));
 }
 
-/** Prepares a loaded mesh: turned to face +z, centred over its feet, its landmarks and limb angles found. */
-export function prepareBodyModel(name: string, positions: Float32Array, normals: Float32Array, index: Uint32Array, settings: BodyModelSettings = {}): BodyModel {
+/** The main axis of some 2D points (x mirrored outward, y up): its angle out from vertical, and extent along and across it. */
+function axisOf(xs: number[], ys: number[]): { angle: number; length: number; halfWidth: number } {
+  const n = xs.length;
+  let mx = 0, my = 0;
+  for (let i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; }
+  mx /= n; my /= n;
+  let cxx = 0, cyy = 0, cxy = 0;
+  for (let i = 0; i < n; i++) { const dx = xs[i] - mx, dy = ys[i] - my; cxx += dx * dx; cyy += dy * dy; cxy += dx * dy; }
+  const a = 0.5 * Math.atan2(2 * cxy, cyy - cxx); // from vertical, + toward +x as y rises
+  const ux = Math.sin(a), uy = Math.cos(a);
+  let lo = Infinity, hi = -Infinity, across = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my, t = dx * ux + dy * uy;
+    lo = Math.min(lo, t); hi = Math.max(hi, t);
+    across = Math.max(across, Math.abs(dx * uy - dy * ux));
+  }
+  // Out-and-down means x grows as y falls: a negative angle; report it as positive out.
+  return { angle: Math.max(0, -a), length: hi - lo, halfWidth: across };
+}
+
+/**
+ * Works out what each part of a segmented model is, from where it sits: the head is
+ * the part at the top; small parts on its front are the face (eyes, mouth); parts
+ * that reach the feet are the legs; of the rest, the biggest is the torso and the
+ * others are fins, by side (+x is the character's left).
+ */
+function classifyParts(pos: Float32Array, part: Int32Array): PartRole[] {
+  const n = Math.max(...part) + 1;
+  const box = Array.from({ length: n }, () => ({ min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity], sum: [0, 0, 0], count: 0 }));
+  let feet = Infinity;
+  for (let v = 0; v < part.length; v++) {
+    const b = box[part[v]];
+    for (let k = 0; k < 3; k++) { const x = pos[v * 3 + k]; b.min[k] = Math.min(b.min[k], x); b.max[k] = Math.max(b.max[k], x); b.sum[k] += x; }
+    b.count++;
+    feet = Math.min(feet, pos[v * 3 + 1]);
+  }
+  const top = Math.max(...box.map((b) => b.max[1])), H = top - feet;
+  const roles: PartRole[] = new Array(n).fill('torso');
+  const head = box.findIndex((b) => b.max[1] === top);
+  roles[head] = 'head';
+  const hb = box[head];
+  const centre = (b: typeof hb, k: number) => b.sum[k] / Math.max(1, b.count);
+  for (let i = 0; i < n; i++) {
+    if (i === head || !box[i].count) continue;
+    const b = box[i];
+    const inHead = [0, 1, 2].every((k) => centre(b, k) >= hb.min[k] && centre(b, k) <= hb.max[k]);
+    if (inHead && b.count < 0.35 * hb.count && centre(b, 2) > 0) roles[i] = 'face';
+    else if (b.min[1] - feet < 0.03 * H) roles[i] = centre(b, 0) >= 0 ? 'legL' : 'legR';
+  }
+  const rest = box.map((_, i) => i).filter((i) => roles[i] === 'torso' && box[i].count);
+  const torso = rest.reduce((a, b) => (box[b].count > box[a].count ? b : a), rest[0]);
+  for (const i of rest) {
+    if (i === torso) continue;
+    if (Math.abs(centre(box[i], 0)) > 0.25 * (box[torso].max[0] - box[torso].min[0])) roles[i] = centre(box[i], 0) >= 0 ? 'finL' : 'finR';
+  }
+  return roles;
+}
+
+/** Prepares a loaded mesh: turned to face +z, centred over its feet, its landmarks, limb angles and measurements found. */
+export function prepareBodyModel(name: string, positions: Float32Array, normals: Float32Array, index: Uint32Array, settings: BodyModelSettings = {},
+  extra: { part?: Int32Array; rig?: ModelRig } = {}): BodyModel {
   const pos = new Float32Array(positions), nrm = new Float32Array(normals);
   const yaw = THREE.MathUtils.degToRad(settings.yaw ?? 0), c = Math.cos(yaw), s = Math.sin(yaw);
   let cx = 0, cz = 0;
@@ -210,11 +299,127 @@ export function prepareBodyModel(name: string, positions: Float32Array, normals:
   const S = slices(pos, index);
   const L = landmarks;
   const tol = 0.01 * (L.top - L.feet);
-  const armAngle = settings.armAngle !== undefined ? THREE.MathUtils.degToRad(settings.armAngle)
-    : finAngle(S, L, tol);
-  const legAngle = settings.legAngle !== undefined ? THREE.MathUtils.degToRad(settings.legAngle)
-    : limbAngle(S, L.feet + 0.1 * (L.crotch - L.feet), L.crotch - 0.1 * (L.crotch - L.feet), tol);
-  return { name, positions: pos, normals: nrm, index, landmarks, found, armAngle, legAngle, head: settings.head ?? 'goo' };
+  let armAngle = finAngle(S, L, tol);
+  let legAngle = limbAngle(S, L.feet + 0.1 * (L.crotch - L.feet), L.crotch - 0.1 * (L.crotch - L.feet), tol);
+  let hip: number | null = null, measures: ModelMeasures | null = null;
+  const part = extra.part ?? null;
+  const roles = part ? classifyParts(pos, part) : [];
+
+  // Segmented: the parts say exactly where everything is.
+  if (part && roles.includes('head') && roles.includes('torso')) {
+    const pts = (role: PartRole) => {
+      const xs: number[] = [], ys: number[] = [], zs: number[] = [];
+      for (let v = 0; v < part.length; v++) if (roles[part[v]] === role) { xs.push(pos[v * 3]); ys.push(pos[v * 3 + 1]); zs.push(pos[v * 3 + 2]); }
+      return { xs, ys, zs };
+    };
+    const ext = (a: number[]) => [Math.min(...a), Math.max(...a)];
+    const head = pts('head'), torso = pts('torso');
+    const [hx0, hx1] = ext(head.xs), [hy0, hy1] = ext(head.ys), [hz0, hz1] = ext(head.zs);
+    const set = (k: keyof Landmarks, v: number) => { if (settings.landmarks?.[k] === undefined) { L[k] = v; found[k] = 'detected'; } };
+    set('neck', hy0);
+    set('crotch', ext(torso.ys)[0]);
+    const fins = (['finL', 'finR'] as const).map((r) => pts(r)).filter((f) => f.xs.length > 10);
+    const legs = (['legL', 'legR'] as const).map((r) => pts(r)).filter((f) => f.xs.length > 10);
+    let finLen = 0, finHalf = 0, finRootX = 0, finTop = 0;
+    if (fins.length) {
+      const fa = fins.map((f) => axisOf(f.xs.map(Math.abs), f.ys));
+      armAngle = fa.reduce((a, f) => a + f.angle, 0) / fa.length;
+      finLen = fa.reduce((a, f) => a + f.length, 0) / fa.length;
+      finHalf = fa.reduce((a, f) => a + f.halfWidth, 0) / fa.length;
+      finTop = fins.reduce((a, f) => a + ext(f.ys)[1], 0) / fins.length;
+      // The root: where the fin's top meets the body, a fin-width in from the top.
+      finRootX = fins.reduce((a, f) => {
+        let sx = 0, k = 0;
+        const [, top] = ext(f.ys);
+        for (let i = 0; i < f.xs.length; i++) if (f.ys[i] > top - finHalf) { sx += Math.abs(f.xs[i]); k++; }
+        return a + sx / Math.max(1, k);
+      }, 0) / fins.length;
+      set('shoulder', finTop - finHalf);
+    }
+    let legHalf = 0, legX = 0;
+    if (legs.length) {
+      const la = legs.map((f) => axisOf(f.xs.map(Math.abs), f.ys));
+      legAngle = la.reduce((a, f) => a + f.angle, 0) / la.length;
+      legHalf = la.reduce((a, f) => a + f.halfWidth, 0) / la.length;
+      hip = legs.reduce((a, f) => a + ext(f.ys)[1], 0) / legs.length - legHalf; // a leg-width under the leg's top
+      legX = legs.reduce((a, f) => a + Math.abs(f.xs.reduce((p, q) => p + q, 0) / f.xs.length), 0) / legs.length;
+    }
+    const torsoHalf = Math.max(...torso.xs.map(Math.abs));
+    measures = {
+      height: L.top - L.feet,
+      headRadius: ((hx1 - hx0) + (hy1 - hy0) + (hz1 - hz0)) / 6, headWidth: hx1 - hx0, headHeight: hy1 - hy0,
+      hip: (hip ?? L.crotch) - L.feet, torsoHalfWidth: torsoHalf,
+      finLength: finLen, finHalfWidth: finHalf, finRootX, legHalfWidth: legHalf, legX,
+    };
+  }
+  if (settings.armAngle !== undefined) armAngle = THREE.MathUtils.degToRad(settings.armAngle);
+  if (settings.legAngle !== undefined) legAngle = THREE.MathUtils.degToRad(settings.legAngle);
+  const rig = extra.rig ?? null;
+  return {
+    name, positions: pos, normals: nrm, index, landmarks, found, armAngle, legAngle, head: settings.head ?? 'goo',
+    weights: settings.weights === 'rig' && rig ? 'rig' : 'ours', part, roles, hip, rig, measures,
+  };
+}
+
+/** A rig bone's name → which of our bones it moves (Mixamo-style names, which Tripo uses). */
+export function ourBoneForRigBone(name: string): string {
+  const n = name.replace(/^.*:/, '').toLowerCase();
+  const side = n.startsWith('left') ? 'L' : n.startsWith('right') ? 'R' : '';
+  if (side) {
+    if (/upleg|thigh/.test(n)) return `thigh${side}`;
+    if (/leg|foot|toe|calf|shin/.test(n)) return `shin${side}`;
+    if (/forearm|hand|thumb|index|middle|ring|pinky/.test(n)) return `forearm${side}`;
+    if (/arm|shoulder/.test(n)) return `upperArm${side}`;
+  }
+  if (/neck|head/.test(n)) return 'head';
+  if (/spine2|spine1|chest/.test(n)) return 'chest';
+  return 'torso'; // hips, spine, anything else
+}
+
+// ---------------------------------------------------------------- our proportions, from the model
+
+type ProportionKey = keyof typeof PROPORTIONS;
+
+/**
+ * Multipliers on our proportions so a standard adult comes out shaped like the model:
+ * the same head size (and height on the body), leg length, body width, fin length and
+ * thickness, leg thickness, and where the fins and legs join, all as shares of the
+ * height. Babies, elders and every slider still work on top of this. Needs a segmented
+ * model (null otherwise). Solved by repeatedly nudging each multiplier by how far off
+ * its measurement is, since they interact (longer legs lift the head, and so on).
+ */
+export function calibrate(m: BodyModel): Partial<Record<ProportionKey, number>> | null {
+  const M = m.measures;
+  if (!M || !M.height) return null;
+  const H = M.height, L = m.landmarks;
+  const adult = { age: 0.5, weight: 0, fitness: 0 };
+  const f: Partial<Record<ProportionKey, number>> = { headSize: 1, legLength: 1, bodyHeight: 1, bodyWidth: 1, finLength: 1, finWidth: 1, legThickness: 1, shoulderWidth: 1, hipWidth: 1 };
+  const maxR = (p: readonly (readonly [number, number])[]) => Math.max(...p.map(([, r]) => r));
+  setProportionCalibration({});
+  const want = {
+    head: (2 * M.headRadius) / H, hip: M.hip / H, neck: (L.neck - L.feet) / H, torso: M.torsoHalfWidth / H,
+    finLen: M.finLength / H, finW: M.finHalfWidth / H, legW: M.legHalfWidth / H, finX: M.finRootX / H, legX: M.legX / H,
+  };
+  const clamp = (k: ProportionKey) => { f[k] = Math.min(4, Math.max(0.25, f[k]!)); };
+  for (let it = 0; it < 12; it++) {
+    const P = { ...PROPORTIONS };
+    for (const k in f) P[k as ProportionKey] *= f[k as ProportionKey]!;
+    const D = bodyDims(P, adult), h = D.height;
+    const nudge = (k: ProportionKey, target: number, now: number, power = 1) => {
+      if (target > 0 && now > 0) { f[k]! *= Math.pow(target / now, power); clamp(k); }
+    };
+    nudge('headSize', want.head, (2 * D.headR) / h);
+    nudge('legLength', want.hip, D.hipY / h);
+    nudge('bodyHeight', want.neck - want.hip, (D.headY - D.headR - D.hipY) / h);
+    nudge('bodyWidth', want.torso, maxR(D.skin.body) / h, 0.8);
+    if (want.finLen) nudge('finLength', want.finLen, (D.upperArmLen + D.forearmLen + D.forearmR) / h, 0.8);
+    if (want.finW) nudge('finWidth', want.finW, maxR(D.skin.arm) / h, 0.8);
+    if (want.legW) nudge('legThickness', want.legW, maxR(D.skin.leg) / h, 0.8);
+    if (want.finX) nudge('shoulderWidth', want.finX, D.shoulderX / h, 0.6);
+    if (want.legX) nudge('hipWidth', want.legX, D.hipX / h, 0.6);
+  }
+  for (const k in f) f[k as ProportionKey] = Math.round(f[k as ProportionKey]! * 1000) / 1000;
+  return f;
 }
 
 // ---------------------------------------------------------------- fitting it to a tenant
@@ -232,7 +437,7 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
   const L = m.landmarks;
   // 1–2. Heights remapped landmark to landmark; across, scaled with the height.
   const ourCrotch = D.hipY - 0.15 * D.thighLen, ourNeck = D.headY - D.headR;
-  const knots: [number, number][] = [[L.feet, 0], [L.crotch, ourCrotch], [L.shoulder, D.shoulderY], [L.neck, ourNeck], [L.top, D.height]];
+  const knots: [number, number][] = [[L.feet, 0], m.hip !== null ? [m.hip, D.hipY] : [L.crotch, ourCrotch], [L.shoulder, D.shoulderY], [L.neck, ourNeck], [L.top, D.height]];
   const mapY = (y: number) => {
     for (let k = 1; k < knots.length; k++) {
       const [a0, b0] = knots[k - 1], [a1, b1] = knots[k];
@@ -247,7 +452,11 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
   const keepTri: number[] = [];
   for (let t = 0; t < m.index.length; t += 3) {
     const a = m.index[t], b = m.index[t + 1], c = m.index[t + 2];
-    if (m.head === 'goo' && (src[a * 3 + 1] + src[b * 3 + 1] + src[c * 3 + 1]) / 3 > L.neck) continue;
+    if (m.part) {
+      // Segmented: drop the face, and the head itself when the goo head replaces it.
+      const role = m.roles[m.part[a]];
+      if (role === 'face' || (role === 'head' && m.head === 'goo')) continue;
+    } else if (m.head === 'goo' && (src[a * 3 + 1] + src[b * 3 + 1] + src[c * 3 + 1]) / 3 > L.neck) continue;
     keepTri.push(a, b, c);
   }
   // Compact to the vertices still used.
@@ -263,9 +472,13 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
   }
   const index = new Uint32Array(keepTri.length);
   for (let t = 0; t < keepTri.length; t++) index[t] = remap[keepTri[t]];
+  // Each kept vertex's part role, and (from the model's rig) its weights by our bone name.
+  const vRole: (PartRole | null)[] = new Array(count).fill(null);
+  const vSrc = new Int32Array(count);
+  for (let i = 0; i < remap.length; i++) if (remap[i] >= 0) { vSrc[remap[i]] = i; vRole[remap[i]] = m.part ? m.roles[m.part[i]] : null; }
 
   // 3. Capsules swung out to the model's limb angles, for weighting.
-  type Seg = { bone: number; region: number; side: number; ax: number; ay: number; bx: number; by: number; z: number; r: number; limb: Limb | null };
+  type Seg = { name: string; bone: number; region: number; side: number; ax: number; ay: number; bx: number; by: number; z: number; r: number; limb: Limb | null };
   type Limb = { px: number; py: number; angle: number; len: number; side: number };
   const limbs = new Map<string, Limb>();
   const segs: Seg[] = caps.map((c) => {
@@ -289,7 +502,7 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
       return [limb.px + dx * Math.cos(a) - dy * Math.sin(a), limb.py + dx * Math.sin(a) + dy * Math.cos(a)];
     };
     const [ax, ay] = swing(c.cx, c.cy - c.half), [bx, by] = swing(c.cx, c.cy + c.half);
-    return { bone: c.bone, region: REGION[c.name] ?? 0, side, ax, ay, bx, by, z: c.cz, r: c.r, limb };
+    return { name: c.name, bone: c.bone, region: REGION[c.name] ?? 0, side, ax, ay, bx, by, z: c.cz, r: c.r, limb };
   });
 
   // 4. Weights and clothes data, then the limbs swung back to hang straight.
@@ -297,13 +510,24 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
   const clothA = new Float32Array(count * 4), clothB = new Float32Array(count * 4);
   const d = new Float32Array(segs.length), w = new Float32Array(segs.length);
   const order: number[] = segs.map((_, i) => i);
+  // Which of our bones each part may follow (a part's own limb, plus what it joins).
+  const ALLOWED: Record<PartRole, (name: string) => boolean> = {
+    legL: (n) => n === 'thighL' || n === 'shinL' || n === 'torso',
+    legR: (n) => n === 'thighR' || n === 'shinR' || n === 'torso',
+    finL: (n) => n === 'upperArmL' || n === 'forearmL' || n === 'chest',
+    finR: (n) => n === 'upperArmR' || n === 'forearmR' || n === 'chest',
+    torso: (n) => !n.startsWith('shin') && !n.startsWith('forearm') && n !== 'head',
+    head: () => true, face: () => true,
+  };
+  const segByName = new Map(segs.map((g, i) => [g.name, i]));
   for (let v = 0; v < count; v++) {
     const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+    const role = vRole[v];
     let dMin = Infinity;
     for (let s = 0; s < segs.length; s++) {
       const g = segs[s];
-      // A limb only takes vertices on its own side of the body.
-      if (g.side && x * g.side < -0.25 * D.hipX) { d[s] = Infinity; continue; }
+      // A limb only takes vertices on its own side of the body (and a part only its own bones).
+      if ((g.side && x * g.side < -0.25 * D.hipX) || (role && !ALLOWED[role](g.name))) { d[s] = Infinity; continue; }
       const ex = g.bx - g.ax, ey = g.by - g.ay, l2 = ex * ex + ey * ey || 1;
       const u = Math.max(0, Math.min(1, ((x - g.ax) * ex + (y - g.ay) * ey) / l2));
       d[s] = Math.max(0, Math.hypot(x - g.ax - ex * u, y - g.ay - ey * u, z - g.z) - g.r);
@@ -312,6 +536,19 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
     const soft = 0.15 * D.bellyR; // how far a bone's pull reaches past the nearest one: small keeps limbs crisp
     let sum = 0;
     for (let s = 0; s < segs.length; s++) { w[s] = Number.isFinite(d[s]) ? Math.exp(-(d[s] - dMin) / soft) : 0; sum += w[s]; }
+    if (m.weights === 'rig' && m.rig) {
+      // The model's own rig instead: its bones' weights, summed onto ours by name.
+      w.fill(0); sum = 0;
+      const i0 = vSrc[v] * 4;
+      for (let k = 0; k < 4; k++) {
+        const ww = m.rig.weights[i0 + k];
+        if (ww <= 0) continue;
+        const our = ourBoneForRigBone(m.rig.names[m.rig.joints[i0 + k]]);
+        const s = segByName.get(our === 'head' ? 'chest' : our);
+        if (s !== undefined) { w[s] += ww; sum += ww; }
+      }
+      if (sum <= 0) { const s = segByName.get('torso')!; w[s] = 1; sum = 1; }
+    }
     order.sort((a, b) => w[b] - w[a]);
     let top = 0;
     for (let k = 0; k < 4; k++) top += w[order[k]];
@@ -373,7 +610,7 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
  * Loads a .glb (every mesh in it merged, as placed in the file) and, if there is one,
  * the settings file next to it (same name, .json).
  */
-export async function loadBodyModel(url: string): Promise<BodyModel> {
+export async function loadBodyModel(url: string, overrides: BodyModelSettings = {}): Promise<BodyModel> {
   const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
   const gltf = await new GLTFLoader().loadAsync(url);
   let settings: BodyModelSettings = {};
@@ -381,7 +618,10 @@ export async function loadBodyModel(url: string): Promise<BodyModel> {
     const r = await fetch(url.replace(/\.glb$/i, '.json'));
     if (r.ok) settings = (await r.json()) as BodyModelSettings;
   } catch { /* no settings: all automatic */ }
-  const pos: number[] = [], nrm: number[] = [], idx: number[] = [];
+  settings = { ...settings, ...overrides };
+  const pos: number[] = [], nrm: number[] = [], idx: number[] = [], part: number[] = [];
+  const joints: number[] = [], weights: number[] = [], names: string[] = [];
+  let parts = 0, rigged = true;
   gltf.scene.updateMatrixWorld(true);
   gltf.scene.traverse((o) => {
     const mesh = o as THREE.Mesh;
@@ -391,11 +631,27 @@ export async function loadBodyModel(url: string): Promise<BodyModel> {
     if (!g.index) g = g.toNonIndexed();
     const base = pos.length / 3;
     const p = g.attributes.position, n = g.attributes.normal;
-    for (let i = 0; i < p.count; i++) { pos.push(p.getX(i), p.getY(i), p.getZ(i)); nrm.push(n.getX(i), n.getY(i), n.getZ(i)); }
+    for (let i = 0; i < p.count; i++) { pos.push(p.getX(i), p.getY(i), p.getZ(i)); nrm.push(n.getX(i), n.getY(i), n.getZ(i)); part.push(parts); }
     if (g.index) for (const i of g.index.array) idx.push(base + i);
     else for (let i = 0; i < p.count; i++) idx.push(base + i);
+    // Its rig, if it has one: joints as indices into one shared list of bone names.
+    const sk = (mesh as THREE.SkinnedMesh).skeleton, si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
+    if (sk && si && sw) {
+      for (let i = 0; i < p.count; i++) {
+        for (let k = 0; k < 4; k++) {
+          const bn = sk.bones[si.getComponent(i, k)]?.name ?? '';
+          let j = names.indexOf(bn);
+          if (j < 0) { j = names.length; names.push(bn); }
+          joints.push(j); weights.push(sw.getComponent(i, k));
+        }
+      }
+    } else rigged = false;
+    parts++;
   });
   if (!pos.length) throw new Error(`${url}: no meshes in it`);
   const name = url.split('/').pop()!.replace(/\.glb$/i, '');
-  return prepareBodyModel(name, Float32Array.from(pos), Float32Array.from(nrm), Uint32Array.from(idx), settings);
+  return prepareBodyModel(name, Float32Array.from(pos), Float32Array.from(nrm), Uint32Array.from(idx), settings, {
+    part: parts > 1 ? Int32Array.from(part) : undefined,
+    rig: rigged && names.length ? { joints: Uint16Array.from(joints), weights: Float32Array.from(weights), names } : undefined,
+  });
 }

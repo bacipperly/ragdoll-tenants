@@ -13,8 +13,25 @@ type Proportions = typeof PROPORTIONS;
 
 type Traits = { age: number; weight: number; fitness: number };
 
-/** Proportions with the traits (age, weight, fitness) applied on top. */
+/**
+ * Multipliers that fit our proportions to an imported body model (see calibrate() in
+ * bodyModel.ts), applied on top of everything else. Empty: no change.
+ */
+const CALIBRATION: Partial<Record<keyof Proportions, number>> = {};
+export function setProportionCalibration(f: Partial<Record<keyof Proportions, number>>): void {
+  for (const k of Object.keys(CALIBRATION)) delete CALIBRATION[k as keyof Proportions];
+  Object.assign(CALIBRATION, f);
+}
+export function proportionCalibration(): Readonly<Partial<Record<keyof Proportions, number>>> { return CALIBRATION; }
+
+/** Proportions with the traits (age, weight, fitness) applied on top, then any calibration. */
 function effectiveProportions(P: Proportions, T: Traits): Proportions {
+  const out = traitProportions(P, T);
+  for (const k in CALIBRATION) (out as Record<string, number>)[k] *= CALIBRATION[k as keyof Proportions]!;
+  return out;
+}
+
+function traitProportions(P: Proportions, T: Traits): Proportions {
   const t = traitEffects(T).proportions;
   // Overall size scales every length and thickness (the face scales with the head).
   const s = t.size;
@@ -158,6 +175,6 @@ export function bodyDims(base: Proportions = PROPORTIONS, traits: Traits = TRAIT
     },
   };
   // Identifies the shape: the tuned proportions plus the traits.
-  const key = [...Object.values(base), traits.age, traits.weight, traits.fitness].map(r4).join(',');
+  const key = [...Object.values(base), traits.age, traits.weight, traits.fitness, ...Object.values(CALIBRATION)].map(r4).join(',');
   return { ...dims, key };
 }

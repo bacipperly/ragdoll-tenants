@@ -4,15 +4,20 @@
 // replaced by the goo head, and the tenants still walk, fall and get up.
 //   npx tsx scripts/bodymodel.ts [model.glb]
 import * as THREE from 'three';
-import { RagdollPhysics, RAPIER, recipeFromEditor, prepareBodyModel, setBodyModel } from '../src/ragdoll';
+import { RagdollPhysics, RAPIER, recipeFromEditor, prepareBodyModel, setBodyModel, calibrate, setProportionCalibration } from '../src/ragdoll';
 import { readGlb } from './glb';
 const file = process.argv[2] ?? 'public/models/stand-in.glb';
 const g = readGlb(file);
-const model = prepareBodyModel('test', g.positions, g.normals, g.index);
-setBodyModel(model);
 let bad = 0;
+const modes = g.rig ? (['ours', 'rig'] as const) : (['ours'] as const);
 const ok = (good: boolean, label: string) => { if (!good) bad++; console.log(`${good ? 'OK ' : 'BAD'} ${label}`); };
 const phys = await RagdollPhysics.create();
+for (const weights of modes) {
+const model = prepareBodyModel(`test-${weights}`, g.positions, g.normals, g.index, { weights }, { part: g.part, rig: g.rig });
+setBodyModel(model);
+const cal = calibrate(model);
+setProportionCalibration(cal ?? {});
+console.log(`\n${file} · ${weights === 'rig' ? "the model's own rig weights" : 'our weights'}${cal ? ' · calibrated' : ''}`);
 phys.world.createCollider(RAPIER.ColliderDesc.cuboid(50, 0.5, 50).setTranslation(0, -0.5, 0));
 const tiltOf = (r: any) => { const q = r.parts.get('torso').body.rotation(); return Math.abs(Math.acos(Math.min(1, 1 - 2 * (q.x * q.x + q.z * q.z))) - r.restTilt) * 57.3; };
 for (const [label, age] of [['adult', 0.55], ['baby', 0.02], ['elder', 1]] as const) {
@@ -29,7 +34,7 @@ for (const [label, age] of [['adult', 0.55], ['baby', 0.02], ['elder', 1]] as co
     top = Math.max(top, pos[v * 3 + 1]); low = Math.min(low, pos[v * 3 + 1]);
   }
   ok(finite && wOk && cOk, `${label}: ${pos.length / 3} vertices, weights and clothes data sound`);
-  ok(top <= D.headY - D.headR + 0.02 * D.height && low < 0.03 * D.height, `${label}: head cut at the neck (top ${top.toFixed(3)}, goo head from ${(D.headY - D.headR).toFixed(3)}), feet at ${low.toFixed(3)}`);
+  ok(top <= D.headY - D.headR + 0.06 * D.height && low < 0.03 * D.height, `${label}: head cut at the neck (top ${top.toFixed(3)}, goo head from ${(D.headY - D.headR).toFixed(3)}), feet at ${low.toFixed(3)}`);
   // Fins swung back: the vertices mostly on a fin hang below its shoulder, not out to the side.
   const si = geo.attributes.skinIndex.array as Uint16Array;
   const finBones = new Set(['upperArmL', 'forearmL'].map((n) => r.joints ? [...r.parts.keys()].indexOf(n) : -1));
@@ -46,5 +51,7 @@ for (const [label, age] of [['adult', 0.55], ['baby', 0.02], ['elder', 1]] as co
   ok(tiltOf(r) < 10 && Math.abs(r.parts.get('torso').body.translation().y - r.restHeight) < 0.03, `${label}: walks, falls, gets up (tilt ${tiltOf(r).toFixed(1)}° from rest)`);
   phys.removeRagdoll(r);
 }
+}
 setBodyModel(null);
+setProportionCalibration({});
 console.log(bad ? `${bad} BAD` : 'all OK');

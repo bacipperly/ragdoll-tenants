@@ -86,4 +86,5 @@ export class RagdollPhysics {
   }
 }
 export { LIFE_STAGES, lifeStage, dressForStage, type LifeStage } from './lifeStages';
-export { setBodyModel, bodyModel, loadBodyModel, prepareBodyModel, type BodyModel, type BodyModelSettings } from './bodyModel';
+export { setBodyModel, bodyModel, loadBodyModel, prepareBodyModel, calibrate, type BodyModel, type BodyModelSettings } from './bodyModel';
+export { setProportionCalibration, proportionCalibration } from './proportions';

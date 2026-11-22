@@ -548,10 +548,23 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
       const dx = Math.sin(a), dy = -Math.cos(a); // down the limb, as the model holds it
       const t = (x - lb.px) * dx + (y - lb.py) * dy;
       const upperLen = fin ? D.upperArmLen : D.thighLen;
-      const lower = THREE.MathUtils.smoothstep(t, upperLen * 0.6, upperLen * 1.4);
-      const body = 1 - THREE.MathUtils.smoothstep(t, -0.1 * upperLen, 0.35 * upperLen);
+      // Joints blend over a good stretch (in absolute terms too: short, thick legs
+      // otherwise crease sharply), so a tucked knee or a raised fin bends the skin
+      // smoothly instead of stretching a few triangles to shreds.
+      const span = Math.max(upperLen, 1.2 * (fin ? D.upperArmR : D.thighR));
+      const lower = THREE.MathUtils.smoothstep(t, upperLen - 0.6 * span, upperLen + 0.6 * span);
+      const body = 1 - THREE.MathUtils.smoothstep(t, -0.4 * span, 0.7 * span);
       w.fill(0);
       w[low] = (1 - body) * lower; w[up] = (1 - body) * (1 - lower); w[root] = body;
+      sum = 1;
+    }
+    // The torso part: only the body's own bones, belly blending into chest by height
+    // (no pull from the limbs: that tore it at the hips and shoulders).
+    if (role === 'torso' && m.weights !== 'rig') {
+      const band = 0.6 * D.chestLen;
+      const chest = THREE.MathUtils.smoothstep(y, D.spineY - band, D.spineY + band);
+      w.fill(0);
+      w[segByName.get('chest')!] = chest; w[segByName.get('torso')!] = 1 - chest;
       sum = 1;
     }
     if (m.weights === 'rig' && m.rig) {

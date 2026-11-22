@@ -56,10 +56,10 @@ function buildEntries(): Record<string, Entry[]> {
       { path: 'PROPORTIONS.headSize', label: 'head size', min: 0.5, max: 1.8, step: 0.01 },
       { path: 'PROPORTIONS.headFloat', label: 'head float gap', min: 0, max: 4, step: 0.05 },
       { path: 'PROPORTIONS.bodyWidth', label: 'body width', min: 0.5, max: 1.8, step: 0.01 },
-      { path: 'PROPORTIONS.bodyHeight', label: 'body height', min: 0.5, max: 1.8, step: 0.01 },
+      { path: 'PROPORTIONS.bodyHeight', label: 'body height', min: 0.3, max: 1.8, step: 0.01 },
       { path: 'PROPORTIONS.legLength', label: 'leg length', min: 0.4, max: 2.5, step: 0.01 },
       { path: 'PROPORTIONS.legThickness', label: 'leg thickness', min: 0.5, max: 1.8, step: 0.01 },
-      { path: 'PROPORTIONS.finLength', label: 'fin length', min: 0.4, max: 1.8, step: 0.01 },
+      { path: 'PROPORTIONS.finLength', label: 'fin length', min: 0.3, max: 1.8, step: 0.01 },
       { path: 'PROPORTIONS.finWidth', label: 'fin width', min: 0.4, max: 2.2, step: 0.01 },
     ],
     'Silhouette': [

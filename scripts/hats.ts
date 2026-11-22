@@ -9,6 +9,7 @@ const styles = ['beanie', 'cap', 'tophat'] as const;
 const crowd = Array.from({ length: 12 }, (_, i) => {
   const r = randomRecipe(base, rand);
   r.outfit.hat = { style: styles[i % 3], color: '#e63946' };
+  r.outfit.hoodie = null; // a hood that's up takes the hat's place (and never falls)
   return phys.createRagdoll({ recipe: r, position: new THREE.Vector3((i % 4) * 2.5, 0, Math.floor(i / 4) * 2.5) });
 });
 const step = (s: number) => { for (let t = 0; t < s; t += 1 / 60) phys.step(1 / 60); };

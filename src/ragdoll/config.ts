@@ -286,11 +286,11 @@ export const CARRY = {
 /** How the face is drawn (sizes in head units; the head's radius is 0.2). */
 export const FACE = {
   /** Half-thickness of the drawn lines: the mouth, and shut eyes (a touch thicker). */
-  line: 0.0028,
+  line: 0.0032,
   /** Half-width of the mouth at rest (× the character's mouth width). */
-  mouthWidth: 0.026,
+  mouthWidth: 0.034,
   /** How far a full smile (or frown) bends the mouth's corners. */
-  smileDepth: 0.012,
+  smileDepth: 0.015,
   /** How far a fully open mouth drops. */
   mouthOpen: 0.04,
   /** The sparkle in each open eye, as a share of the eye's width (0 for none). */

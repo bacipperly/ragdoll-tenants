@@ -32,11 +32,14 @@ export interface Recipe {
   outfit: Outfit;
 }
 
+/** Every tenant's default body colour (the design spec's "Simpson yellow"). */
+export const TENANT_YELLOW = '#ffcb00';
+
 /** Sensible limits for every number in a recipe (the sandbox sliders use the same). */
 export const RECIPE_LIMITS: Record<string, [number, number]> = {
   age: [0, 1], weight: [-1, 1], fitness: [-1, 1],
-  headSize: [0.5, 1.8], headFloat: [0, 4], bodyWidth: [0.5, 1.8], bodyHeight: [0.5, 1.8],
-  legLength: [0.4, 2.5], legThickness: [0.5, 1.8], finLength: [0.4, 1.8], finWidth: [0.4, 2.2],
+  headSize: [0.5, 1.8], headFloat: [0, 4], bodyWidth: [0.5, 1.8], bodyHeight: [0.3, 1.8],
+  legLength: [0.4, 2.5], legThickness: [0.5, 1.8], finLength: [0.3, 1.8], finWidth: [0.4, 2.2],
   shoulderWidth: [0.5, 2], hipWidth: [0.5, 2], waist: [0, 0.6], butt: [0, 1.5],
   eyeSize: [0.5, 1.8], eyeSpacing: [0.6, 1.5], eyeHeight: [-0.3, 0.3], lashes: [0, 1], blush: [0, 1], mouthWidth: [0.5, 2],
 };
@@ -70,7 +73,7 @@ export function loadIntoEditor(r: Recipe): void {
 export function parseRecipe(data: unknown, fallback?: Recipe): Recipe | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
-  const base = fallback ?? recipeFromEditor('Tenant', '#3a86ff', 'calm');
+  const base = fallback ?? recipeFromEditor('Tenant', TENANT_YELLOW, 'calm');
   const nums = <T extends Record<string, number>>(src: unknown, into: T): T => {
     const out = { ...into };
     if (src && typeof src === 'object') {
@@ -133,13 +136,8 @@ export function randomRecipe(base: Recipe, rand: () => number = Math.random): Re
     mouthWidth: near(P.mouthWidth, 0.15),
   };
   for (const k of Object.keys(proportions) as (keyof Proportions)[]) proportions[k] = Math.round(clamp(k, proportions[k]) * 1000) / 1000;
-  // A cheerful colour: any hue, fairly saturated, mid-light.
-  const h = r(), s = between(0.5, 0.8), l = between(0.48, 0.62);
-  const color = '#' + [0, 8, 4].map((n) => {
-    const k = (n + h * 12) % 12;
-    const c = l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-    return Math.round(c * 255).toString(16).padStart(2, '0');
-  }).join('');
+  // Everyone is yellow by default (the design spec); colour is a customization, not chance.
+  const color = TENANT_YELLOW;
   const moods: MoodName[] = ['calm', 'calm', 'calm', 'calm', 'proud', 'shy', 'excited', 'tired', 'curious', 'sulking', 'nervous', 'sad'];
   const round = (v: number) => Math.round(v * 100) / 100;
   return {

@@ -11,7 +11,7 @@ import { TRAITS } from './ragdoll/config';
 import { ageName } from './ragdoll/traits';
 import { createTuner } from './tuner';
 import { addCharactersSection, Crowd, loadLibrary, saveLibrary } from './characters';
-import { loadIntoEditor, recipeFromEditor } from './ragdoll';
+import { loadIntoEditor, recipeFromEditor, TENANT_YELLOW } from './ragdoll';
 import { Carry, Things } from './things';
 
 const hud = document.getElementById('hud')!;
@@ -24,14 +24,23 @@ renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoftShadowMap was removed in
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#cfd8dc');
+scene.background = new THREE.Color('#e9e7e3'); // clean, neutral, near white (the design spec)
 
-// Lighting as in the game: hemisphere + directional sun.
-scene.add(new THREE.HemisphereLight('#ffffff', '#8d9a8f', 1.6));
-const sun = new THREE.DirectionalLight('#fff4e0', 2.2);
+// Soft studio lighting (the design spec): a warm key that casts the shadows, a sky/floor
+// fill whose floor side bounces warm light up under chins, a cool fill from the far side
+// so nothing goes muddy, and a rim from behind to lift the silhouette off the background.
+// None but the key casts shadows, so the extra lights cost next to nothing.
+scene.add(new THREE.HemisphereLight('#ffffff', '#c9b79a', 1.7));
+const sun = new THREE.DirectionalLight('#fff1dc', 2.0);
 sun.position.set(4, 8, 3);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.radius = 3; // softer contact shadows
+const fill = new THREE.DirectionalLight('#e6efff', 0.7);
+fill.position.set(-5, 3, -4);
+const rim = new THREE.DirectionalLight('#ffffff', 0.9);
+rim.position.set(-2, 5, 7);
+scene.add(fill, rim);
 const sc = sun.shadow.camera;
 sc.left = -6; sc.right = 6; sc.top = 6; sc.bottom = -6; sc.near = 0.5; sc.far = 30;
 scene.add(sun, sun.target);
@@ -109,7 +118,7 @@ prop(-3, 0, 1, 1, 0.9, 1, '#e76f51'); // counter-height box to bump into
 prop(-2, 0, -3, 3, 0.45, 1, '#8ecae6'); // sofa-seat height bench
 prop(1.5, 0, -4, 1, 0.25, 1, '#ffb703');
 
-let ragdoll = physics.createRagdoll({ color: '#3a86ff', position: new THREE.Vector3(0, 0, 0) });
+let ragdoll = physics.createRagdoll({ color: TENANT_YELLOW, position: new THREE.Vector3(0, 0, 0) });
 scene.add(ragdoll.group);
 
 // Things to play with, and picking things (and tenants) up.
@@ -136,7 +145,7 @@ crowd.onSelect = (r) => {
 // its first character; after that you start as the library's default.
 const library = await loadLibrary();
 if (library.characters.length === 0) {
-  const first = recipeFromEditor('My tenant', '#3a86ff', 'calm');
+  const first = recipeFromEditor('My tenant', TENANT_YELLOW, 'calm');
   library.characters.push(first);
   library.default = first.name;
   void saveLibrary(library);

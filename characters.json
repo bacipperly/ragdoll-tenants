@@ -4,7 +4,7 @@
     {
       "version": 1,
       "name": "My tenant",
-      "color": "#3a86ff",
+      "color": "#ffcb00",
       "mood": "calm",
       "traits": {
         "age": 0.5,
@@ -13,12 +13,12 @@
       },
       "proportions": {
         "headSize": 0.7,
-        "headFloat": 1,
+        "headFloat": 0,
         "bodyWidth": 0.83,
-        "bodyHeight": 0.65,
-        "legLength": 0.92,
+        "bodyHeight": 0.38,
+        "legLength": 0.7,
         "legThickness": 0.87,
-        "finLength": 0.8,
+        "finLength": 0.5,
         "finWidth": 0.89,
         "shoulderWidth": 1,
         "hipWidth": 1,

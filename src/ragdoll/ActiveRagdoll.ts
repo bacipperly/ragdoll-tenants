@@ -6,7 +6,7 @@ import { Face, acquireSkin, releaseSkin } from './skin';
 import { bodyDims, type BodyDims } from './proportions';
 import { MoodBlender, MOOD_NAMES, type MoodName } from './mood';
 import { traitEffects, type TraitEffects } from './traits';
-import { recipeFromEditor, type Recipe } from './recipe';
+import { recipeFromEditor, TENANT_YELLOW, type Recipe } from './recipe';
 import { OutfitPainter, parseOutfit, type Outfit } from './outfit';
 import { HAT, Hat } from './hat';
 import { Skirt, hoodDown, disposeMesh, type LegBones } from './garments';
@@ -480,15 +480,18 @@ export class ActiveRagdoll {
 
   constructor(world: RAPIER.World, options: ActiveRagdollOptions = {}) {
     this.world = world;
-    this.recipe = structuredClone(options.recipe ?? recipeFromEditor('Tenant', options.color ?? '#3a86ff', 'calm'));
+    this.recipe = structuredClone(options.recipe ?? recipeFromEditor('Tenant', options.color ?? TENANT_YELLOW, 'calm'));
     this.material = new THREE.MeshStandardMaterial({
-      color: this.recipe.color, roughness: 0.7, metalness: 0,
+      // Soft vinyl: satin rather than chalky, with a faint warm glow in the shadows standing in
+      // for subsurface scattering (see warmGlow).
+      color: this.recipe.color, roughness: 0.5, metalness: 0,
       // Both sides: where skinning folds the skin over itself (a fin pressed to the chest)
       // the fold shows skin, not a hole.
       side: THREE.DoubleSide,
       shadowSide: THREE.BackSide, // only the inside casts shadows, so the skin doesn't shadow itself in stripes
     });
     this.baseColor.copy(this.material.color);
+    this.warmGlow();
     const start = options.position ?? new THREE.Vector3();
     this.facing = options.facing ?? 0;
     this.dims = bodyDims(this.recipe.proportions, this.recipe.traits);
@@ -658,6 +661,12 @@ export class ActiveRagdoll {
     this.recipe.color = hex;
     this.baseColor.set(hex);
     this.material.color.set(hex);
+    this.warmGlow();
+  }
+
+  /** Fake subsurface scattering: a little of the body's own colour, lit from within. */
+  private warmGlow(): void {
+    this.material.emissive.copy(this.baseColor).multiplyScalar(0.07);
   }
 
   /** Wear this outfit: clothes change on the spot (a new hat replaces the old one). */

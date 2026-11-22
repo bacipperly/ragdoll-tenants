@@ -121,10 +121,10 @@ function buildSkin(bone: BoneIndex, B: BodyDims): THREE.BufferGeometry {
  * blush fade in, the tongue slides out from under the lip, the sparkle hides under the lid.
  */
 
-const INK = 0x1b1b2f;
+const INK = 0x14141c;
 /** Drawn just above the head and pulled forward in depth, so the goo never covers it. */
 const decal = (factor: number) => ({ side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: factor, polygonOffsetUnits: 2 * factor });
-const inkMaterial = new THREE.MeshStandardMaterial({ color: INK, roughness: 0.55, ...decal(-2) });
+const inkMaterial = new THREE.MeshStandardMaterial({ color: INK, roughness: 0.22, ...decal(-2) });
 const tongueMaterial = new THREE.MeshStandardMaterial({ color: 0xff6f91, roughness: 0.5, ...decal(-1) });
 const glintMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, ...decal(-3) });
 /** How far above the head each layer is drawn: blush under the tongue under the ink under the sparkle. */
@@ -137,7 +137,7 @@ const LASHES = [[0.35, 0.8], [0.75, 1], [1.15, 0.85]] as const;
 const DEFAULT_FACE: FaceShape = { eyeSize: 1, eyeSpacing: 1, eyeHeight: 0, lashes: 0, blush: 0, mouthWidth: 1 };
 const MOUTH_Y = -0.058;
 /** The open eye's half-sizes, before the character's eye size. */
-const EYE = { w: 0.021, h: 0.046 };
+const EYE = { w: 0.024, h: 0.054 }; // tall glossy ovals, as on the reference sheet
 
 /** Samples across a shape (−1..1), bunched toward the ends so they stay round. */
 const N = 16;
@@ -329,14 +329,14 @@ export class Face {
       this.eyes.push({ ink, glint, x, y: eyeY, side: sx, lashFrame, lashes });
 
       // Blush: a soft rosy patch on each cheek, below and outside the eye.
-      const cx = sx * 0.112 * shape.eyeSpacing, cy = eyeY - 0.06;
+      const cx = sx * 0.112 * shape.eyeSpacing, cy = eyeY - 0.066;
       const cheek = new THREE.Mesh(blushPatch(cx, cy, r), this.blushMaterial);
       anchor(cheek, cx, cy);
       this.cheeks.push(cheek);
 
       // Brows: hidden unless a mood or reaction shows them (the drawing has none).
       const brow = new Outline(this.browMaterial, LIFT.ink);
-      const bx = sx * 0.07 * shape.eyeSpacing, by = eyeY + 0.058 * shape.eyeSize;
+      const bx = sx * 0.07 * shape.eyeSpacing, by = eyeY + 0.068 * shape.eyeSize;
       anchor(brow.mesh, bx, by);
       this.brows.push({ ink: brow, x: bx, y: by, side: sx });
     }

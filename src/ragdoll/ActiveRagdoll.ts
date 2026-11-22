@@ -6,6 +6,8 @@ import { Face, acquireSkin, releaseSkin } from './skin';
 import { bodyDims, type BodyDims } from './proportions';
 import { EXPRESSION_NAMES, MoodBlender, MOOD_NAMES, type ExpressionName, type MoodName, type ReactionName } from './mood';
 import type { AccentSubject, Activity } from './accents';
+import { ACCESSORY_KEYS } from './outfit';
+import { Accessories } from './accessories';
 import { traitEffects, type TraitEffects } from './traits';
 import { recipeFromEditor, TENANT_YELLOW, type Recipe } from './recipe';
 import { OutfitPainter, parseOutfit, type Outfit } from './outfit';
@@ -455,6 +457,8 @@ export class ActiveRagdoll implements AccentSubject {
   private hat: Hat | null = null;
   /** A skirt, and a hoodie's hood lying on the back (meshes; see garments.ts). */
   private skirt: Skirt | null = null;
+  /** Glasses, bow, backpack, cane… (see accessories.ts). */
+  private accessories: Accessories | null = null;
   private hood: THREE.Mesh | null = null;
   private legBones: LegBones[] = [];
   private readonly upAxis = new THREE.Vector3();
@@ -582,6 +586,7 @@ export class ActiveRagdoll implements AccentSubject {
       { thigh: this.part('thighR').bone, shin: this.part('shinR').bone },
     ];
     this.wearGarments();
+    this.wearAccessories();
 
     // Then joints. Identity rotations at rest mean the joint frames are identity,
     // so anchors are just "joint position minus body centre" in each body's space.
@@ -678,6 +683,7 @@ export class ActiveRagdoll implements AccentSubject {
     this.recipe.outfit = structuredClone(o);
     this.painter.set(o);
     if (JSON.stringify([o.skirt, o.hoodie]) !== meshesBefore) this.wearGarments();
+    if (ACCESSORY_KEYS.some((k) => JSON.stringify(o[k]) !== JSON.stringify(before[k]))) this.wearAccessories();
     if (JSON.stringify(this.headwear(o)) === hatBefore && (this.hat || !this.headwear(o))) return;
     this.hat?.dispose(this.world);
     this.hat = null;
@@ -685,15 +691,23 @@ export class ActiveRagdoll implements AccentSubject {
   }
 
   /** What's on its head: a hoodie's hood when it's up (instead of any hat), else the hat. */
-  private headwear(o: Outfit): { style: Hat['style']; color: string } | null {
-    return o.hoodie?.hoodUp ? { style: 'hood', color: o.hoodie.color } : o.hat;
+  private headwear(o: Outfit): { style: Hat['style']; color: string; backwards: boolean } | null {
+    return o.hoodie?.hoodUp ? { style: 'hood', color: o.hoodie.color, backwards: false } : o.hat;
   }
 
   private wearHat(): void {
     const h = this.headwear(this.recipe.outfit);
     if (!h) return;
-    this.hat = new Hat(h.style, h.color, this.dims.headR, this.goo);
+    this.hat = new Hat(h.style, h.color, this.dims.headR, this.goo, h.backwards);
     this.hat.putOn(this.world, this.part('head').bone);
+  }
+
+  /** The accessories: (re)built from the outfit. */
+  private wearAccessories(): void {
+    this.accessories?.dispose();
+    this.accessories = new Accessories(this.recipe.outfit, this.dims, this.face, {
+      chest: this.part('chest').bone, belly: this.part('torso').bone, hand: this.part('forearmR').bone,
+    });
   }
 
   /** The skirt and a hood that's down: (re)built from the outfit. */
@@ -1419,6 +1433,7 @@ export class ActiveRagdoll implements AccentSubject {
       this.headAccelSteps = 0;
     }
     if (this.hat?.isLoose) this.hat.sync(dt, alpha);
+    this.accessories?.update(this.groundY); // the cane stays upright at any distance
     if (this.detail === 'full') {
       this.goo.update(dt, this.part('head').bone.quaternion, this.headAccel, this.gooContact, this.traits.squish, this.muscle * this.muscle);
       this.face.setExpression(this.faceAwake, this.moods.letters, Math.max(this.blink, this.gestures.extras.eyesShut)); // also rides it on the goo
@@ -1537,6 +1552,7 @@ export class ActiveRagdoll implements AccentSubject {
     this.face.dispose();
     this.hat?.dispose(this.world);
     this.skirt?.dispose();
+    this.accessories?.dispose();
     disposeMesh(this.hood);
     releaseSkin(this.dims);
     this.group.removeFromParent();

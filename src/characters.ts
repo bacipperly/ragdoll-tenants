@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import type GUI from 'lil-gui';
 import type { ActiveRagdoll, RagdollPhysics, Recipe } from './ragdoll';
-import { HAT_STYLES, SHIRT_PATTERNS, NO_OUTFIT, TATTOO_SHAPES, TATTOO_SPOTS, loadIntoEditor, parseRecipe, randomOutfit, randomRecipe, recipeFromEditor, type HatStyle, type Outfit, type ShirtPattern } from './ragdoll';
+import { GLASSES_STYLES, HAT_STYLES, SHIRT_PATTERNS, NO_OUTFIT, TATTOO_SHAPES, TATTOO_SPOTS, loadIntoEditor, parseRecipe, randomOutfit, randomRecipe, recipeFromEditor, type GlassesStyle, type HatStyle, type Outfit, type ShirtPattern } from './ragdoll';
 import { GESTURE_NAMES, type GestureName } from './ragdoll/gestures';
 import { MOOD_NAMES } from './ragdoll/mood';
 import { pasteBox } from './tuner';
@@ -294,7 +294,12 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
     socks: false, socksColor: '#ffffff', socksHeight: 0.3,
     shoes: false, shoesColor: '#333333', shoesHeight: 0.2,
     gloves: false, glovesColor: '#ffffff', glovesLength: 0.3,
-    hat: false, hatStyle: 'beanie' as HatStyle, hatColor: '#e63946',
+    hat: false, hatStyle: 'beanie' as HatStyle, hatColor: '#e63946', backwards: false,
+    glasses: false, glassesStyle: 'round' as GlassesStyle, glassesColor: '#2b2d42',
+    bow: false, bowColor: '#e63946', headphones: false, headphonesColor: '#9b5de5',
+    pacifier: false, pacifierColor: '#8ecae6',
+    whiskers: false, whiskersColor: '#f4f4f4', mustache: true, brows: true,
+    backpack: false, backpackColor: '#3a86ff', bag: false, bagColor: '#7f5539', cane: false, caneColor: '#7f5539',
     tat1: false, tat1Shape: 'heart', tat1Spot: 'finL', tat1Color: '#2b2d42', tat1Size: 0.5,
     tat2: false, tat2Shape: 'star', tat2Spot: 'belly', tat2Color: '#2b2d42', tat2Size: 0.5,
   };
@@ -306,7 +311,15 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
     socks: w.socks ? { color: w.socksColor, height: w.socksHeight } : null,
     shoes: w.shoes ? { color: w.shoesColor, height: w.shoesHeight } : null,
     gloves: w.gloves ? { color: w.glovesColor, length: w.glovesLength } : null,
-    hat: w.hat ? { style: w.hatStyle, color: w.hatColor } : null,
+    hat: w.hat ? { style: w.hatStyle, color: w.hatColor, backwards: w.backwards } : null,
+    glasses: w.glasses ? { style: w.glassesStyle, color: w.glassesColor } : null,
+    bow: w.bow ? { color: w.bowColor } : null,
+    headphones: w.headphones ? { color: w.headphonesColor } : null,
+    pacifier: w.pacifier ? { color: w.pacifierColor } : null,
+    whiskers: w.whiskers ? { color: w.whiskersColor, mustache: w.mustache, brows: w.brows } : null,
+    backpack: w.backpack ? { color: w.backpackColor } : null,
+    bag: w.bag ? { color: w.bagColor } : null,
+    cane: w.cane ? { color: w.caneColor } : null,
     tattoos: [
       ...(w.tat1 ? [{ shape: w.tat1Shape, spot: w.tat1Spot, color: w.tat1Color, size: w.tat1Size }] : []),
       ...(w.tat2 ? [{ shape: w.tat2Shape, spot: w.tat2Spot, color: w.tat2Color, size: w.tat2Size }] : []),
@@ -322,7 +335,15 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
     w.socks = !!o.socks; if (o.socks) { w.socksColor = o.socks.color; w.socksHeight = o.socks.height; }
     w.shoes = !!o.shoes; if (o.shoes) { w.shoesColor = o.shoes.color; w.shoesHeight = o.shoes.height; }
     w.gloves = !!o.gloves; if (o.gloves) { w.glovesColor = o.gloves.color; w.glovesLength = o.gloves.length; }
-    w.hat = !!o.hat; if (o.hat) { w.hatStyle = o.hat.style; w.hatColor = o.hat.color; }
+    w.hat = !!o.hat; if (o.hat) { w.hatStyle = o.hat.style; w.hatColor = o.hat.color; w.backwards = o.hat.backwards; }
+    w.glasses = !!o.glasses; if (o.glasses) { w.glassesStyle = o.glasses.style; w.glassesColor = o.glasses.color; }
+    w.bow = !!o.bow; if (o.bow) w.bowColor = o.bow.color;
+    w.headphones = !!o.headphones; if (o.headphones) w.headphonesColor = o.headphones.color;
+    w.pacifier = !!o.pacifier; if (o.pacifier) w.pacifierColor = o.pacifier.color;
+    w.whiskers = !!o.whiskers; if (o.whiskers) { w.whiskersColor = o.whiskers.color; w.mustache = o.whiskers.mustache; w.brows = o.whiskers.brows; }
+    w.backpack = !!o.backpack; if (o.backpack) w.backpackColor = o.backpack.color;
+    w.bag = !!o.bag; if (o.bag) w.bagColor = o.bag.color;
+    w.cane = !!o.cane; if (o.cane) w.caneColor = o.cane.color;
     const [t1, t2] = o.tattoos;
     w.tat1 = !!t1; if (t1) { w.tat1Shape = t1.shape; w.tat1Spot = t1.spot; w.tat1Color = t1.color; w.tat1Size = t1.size; }
     w.tat2 = !!t2; if (t2) { w.tat2Shape = t2.shape; w.tat2Spot = t2.spot; w.tat2Color = t2.color; w.tat2Size = t2.size; }
@@ -383,6 +404,28 @@ function addOutfitFolder(parent: GUI, crowd: Crowd): () => void {
     g.add(w, 'hat').name('wearing one');
     g.add(w, 'hatStyle', HAT_STYLES).name('style');
     g.addColor(w, 'hatColor').name('colour');
+    g.add(w, 'backwards').name('worn backwards (caps)');
+  });
+  group('Accessories', (g) => {
+    g.add(w, 'glasses').name('glasses');
+    g.add(w, 'glassesStyle', GLASSES_STYLES).name('frames');
+    g.addColor(w, 'glassesColor').name('frame colour');
+    g.add(w, 'bow').name('bow');
+    g.addColor(w, 'bowColor').name('bow colour');
+    g.add(w, 'headphones').name('headphones');
+    g.addColor(w, 'headphonesColor').name('headphone colour');
+    g.add(w, 'pacifier').name('pacifier');
+    g.addColor(w, 'pacifierColor').name('pacifier colour');
+    g.add(w, 'whiskers').name('whiskers');
+    g.addColor(w, 'whiskersColor').name('whisker colour');
+    g.add(w, 'mustache').name('…mustache');
+    g.add(w, 'brows').name('…bushy brows');
+    g.add(w, 'backpack').name('backpack');
+    g.addColor(w, 'backpackColor').name('backpack colour');
+    g.add(w, 'bag').name('shoulder bag');
+    g.addColor(w, 'bagColor').name('bag colour');
+    g.add(w, 'cane').name('cane');
+    g.addColor(w, 'caneColor').name('cane colour');
   });
   group('Tattoos', (g) => {
     for (const n of [1, 2] as const) {

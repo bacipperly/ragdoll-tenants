@@ -17,6 +17,10 @@ import type { BodyDims } from './proportions';
 
 export type HatStyle = 'beanie' | 'cap' | 'tophat';
 export const HAT_STYLES: HatStyle[] = ['beanie', 'cap', 'tophat'];
+export type GlassesStyle = 'round' | 'square';
+export const GLASSES_STYLES: GlassesStyle[] = ['round', 'square'];
+/** The outfit's accessories (each null when not worn). */
+export const ACCESSORY_KEYS = ['glasses', 'bow', 'headphones', 'pacifier', 'whiskers', 'backpack', 'bag', 'cane'] as const;
 export type ShirtPattern = 'plain' | 'stripes' | 'pinstripes' | 'dots' | 'gingham' | 'zigzag' | 'hearts' | 'stars';
 export const SHIRT_PATTERNS: ShirtPattern[] = ['plain', 'stripes', 'pinstripes', 'dots', 'gingham', 'zigzag', 'hearts', 'stars'];
 /** How big one repeat of each pattern is (world units). */
@@ -44,12 +48,31 @@ export interface Outfit {
   shoes: { color: string; height: number } | null;
   /** length: 0 just the tips … 1 long gloves. */
   gloves: { color: string; length: number } | null;
-  hat: { style: HatStyle; color: string } | null;
+  /** backwards: a cap's visor round the back. */
+  hat: { style: HatStyle; color: string; backwards: boolean } | null;
+  // ---- Accessories (see accessories.ts): little extras, several of them telling an age.
+  glasses: { style: GlassesStyle; color: string } | null;
+  /** A bow on top of the head, to one side. */
+  bow: { color: string } | null;
+  headphones: { color: string } | null;
+  /** A baby's dummy, in the mouth. */
+  pacifier: { color: string } | null;
+  /** White (or any colour) facial hair: a bushy mustache, bushy brows, or both. */
+  whiskers: { color: string; mustache: boolean; brows: boolean } | null;
+  backpack: { color: string } | null;
+  /** A shoulder bag on a strap across the body. */
+  bag: { color: string } | null;
+  /** A walking cane, in one fin. */
+  cane: { color: string } | null;
   /** Up to two. size: 0 small … 1 big. */
   tattoos: { shape: TattooShape; spot: TattooSpot; color: string; size: number }[];
 }
 
-export const NO_OUTFIT: Outfit = { shirt: null, hoodie: null, skirt: null, pants: null, socks: null, shoes: null, gloves: null, hat: null, tattoos: [] };
+export const NO_OUTFIT: Outfit = {
+  shirt: null, hoodie: null, skirt: null, pants: null, socks: null, shoes: null, gloves: null, hat: null,
+  glasses: null, bow: null, headphones: null, pacifier: null, whiskers: null, backpack: null, bag: null, cane: null,
+  tattoos: [],
+};
 export const MAX_TATTOOS = 2;
 
 // ---------------------------------------------------------------- reading recipes
@@ -65,6 +88,8 @@ export function parseOutfit(data: unknown): Outfit {
   const d = obj(data);
   if (!d) return structuredClone(NO_OUTFIT);
   const s = obj(d.shirt), hd = obj(d.hoodie), sk = obj(d.skirt), p = obj(d.pants), so = obj(d.socks), sh = obj(d.shoes), g = obj(d.gloves), h = obj(d.hat);
+  const gl = obj(d.glasses), wh = obj(d.whiskers);
+  const just = (v: unknown, fallback: string) => { const o = obj(v); return o && { color: col(o.color, fallback) }; };
   return {
     shirt: s && {
       color: col(s.color, '#ffffff'), length: num(s.length, 0.6), sleeves: num(s.sleeves, 0.3),
@@ -79,7 +104,15 @@ export function parseOutfit(data: unknown): Outfit {
     socks: so && { color: col(so.color, '#ffffff'), height: num(so.height, 0.3) },
     shoes: sh && { color: col(sh.color, '#333333'), height: num(sh.height, 0.2) },
     gloves: g && { color: col(g.color, '#ffffff'), length: num(g.length, 0.3) },
-    hat: h && { style: pick(h.style, HAT_STYLES, 'beanie'), color: col(h.color, '#e63946') },
+    hat: h && { style: pick(h.style, HAT_STYLES, 'beanie'), color: col(h.color, '#e63946'), backwards: h.backwards === true },
+    glasses: gl && { style: pick(gl.style, GLASSES_STYLES, 'round'), color: col(gl.color, '#2b2d42') },
+    bow: just(d.bow, '#e63946'),
+    headphones: just(d.headphones, '#9b5de5'),
+    pacifier: just(d.pacifier, '#8ecae6'),
+    whiskers: wh && { color: col(wh.color, '#f4f4f4'), mustache: wh.mustache !== false, brows: wh.brows !== false },
+    backpack: just(d.backpack, '#3a86ff'),
+    bag: just(d.bag, '#7f5539'),
+    cane: just(d.cane, '#7f5539'),
     tattoos: (Array.isArray(d.tattoos) ? d.tattoos : []).slice(0, MAX_TATTOOS).map(obj).filter((t) => t !== null).map((t) => ({
       shape: pick(t.shape, TATTOO_SHAPES, 'heart'), spot: pick(t.spot, TATTOO_SPOTS, 'finL'),
       color: col(t.color, '#2b2d42'), size: num(t.size, 0.5),
@@ -93,8 +126,12 @@ const CLOTH_COLORS = [
   '#bde0fe', '#9b5de5', '#f15bb5', '#00bbf9', '#00f5d4', '#3a3a3a', '#7f5539',
 ];
 
-/** A random outfit: most wear a shirt and pants, some socks, shoes, a hat, now and then a tattoo. */
-export function randomOutfit(rand: () => number = Math.random): Outfit {
+/**
+ * A random outfit: most wear a shirt and pants, some socks, shoes, a hat, now and then a
+ * tattoo, and accessories that suit their age (a baby's dummy and nappy, a kid's
+ * backpack, a teen's headphones, an elder's glasses, whiskers and cane…).
+ */
+export function randomOutfit(rand: () => number = Math.random, age = 0.5): Outfit {
   const r = rand;
   const c = () => CLOTH_COLORS[Math.floor(r() * CLOTH_COLORS.length)];
   const round = (v: number) => Math.round(v * 100) / 100;
@@ -116,9 +153,30 @@ export function randomOutfit(rand: () => number = Math.random): Outfit {
     socks: r() < 0.3 ? { color: c(), height: between(0, 1) } : null,
     shoes: r() < 0.5 ? { color: c(), height: between(0, 0.6) } : null,
     gloves: r() < 0.1 ? { color: c(), length: between(0, 0.8) } : null,
-    hat: r() < 0.35 ? { style: HAT_STYLES[Math.floor(r() * HAT_STYLES.length)], color: c() } : null,
+    hat: r() < 0.35 ? { style: HAT_STYLES[Math.floor(r() * HAT_STYLES.length)], color: c(), backwards: age > 0.25 && age < 0.5 && r() < 0.5 } : null,
+    ...randomAccessories(r, c, age),
     tattoos,
   };
+}
+
+/** Accessories by life stage (see LIFE_STAGES): what someone that age might well have on. */
+type AccessoryKey = (typeof ACCESSORY_KEYS)[number];
+function randomAccessories(r: () => number, c: () => string, age: number): Pick<Outfit, AccessoryKey> & Partial<Pick<Outfit, 'pants' | 'shirt'>> {
+  const baby = age < 0.07, kid = age >= 0.18 && age < 0.3, teen = age >= 0.3 && age < 0.4, young = age >= 0.4 && age < 0.63;
+  const older = age >= 0.63, elder = age >= 0.86;
+  const out: Pick<Outfit, AccessoryKey> & Partial<Pick<Outfit, 'pants' | 'shirt'>> = {
+    glasses: r() < (elder ? 0.6 : older ? 0.4 : baby ? 0 : 0.12) ? { style: GLASSES_STYLES[Math.floor(r() * 2)], color: r() < 0.6 ? '#2b2d42' : c() } : null,
+    bow: !baby && r() < 0.1 ? { color: c() } : null,
+    headphones: r() < (teen ? 0.4 : young ? 0.12 : 0) ? { color: c() } : null,
+    pacifier: baby && r() < 0.6 ? { color: c() } : null,
+    whiskers: elder && r() < 0.5 ? { color: '#f4f4f4', mustache: r() < 0.8, brows: true } : null,
+    backpack: r() < (kid ? 0.45 : teen ? 0.2 : 0) ? { color: c() } : null,
+    bag: r() < (young ? 0.25 : older ? 0.1 : 0) ? { color: r() < 0.5 ? '#7f5539' : c() } : null,
+    cane: elder && r() < 0.4 ? { color: '#7f5539' } : null,
+  };
+  // Babies mostly wear just a nappy.
+  if (baby && r() < 0.7) { out.pants = { color: '#ffffff', rise: 0.35, legs: 0 }; out.shirt = null; }
+  return out;
 }
 
 // ---------------------------------------------------------------- painting the skin

@@ -16,6 +16,7 @@
  */
 import { TRAITS } from './config';
 import type { Word } from './mood';
+import { lifeStage } from './lifeStages';
 
 /** Multipliers (×) and nudges (+) the traits apply. 1 / 0 = no change. */
 export interface TraitEffects {
@@ -109,9 +110,9 @@ export function traitEffects(t: { age: number; weight: number; fitness: number }
   };
 }
 
-/** A friendly name for an age value. */
+/** A friendly name for an age value: its life stage (see lifeStages.ts). */
 export function ageName(age: number): string {
-  return age < 0.12 ? 'baby' : age < 0.38 ? 'kid' : age < 0.72 ? 'adult' : 'senior';
+  return lifeStage(age).name;
 }
 
 /** Starting points for the sandbox's trait buttons. */

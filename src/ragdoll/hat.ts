@@ -37,7 +37,11 @@ export class Hat {
   private readonly tmpQ = new THREE.Quaternion();
   private readonly v = new THREE.Vector3();
 
-  constructor(readonly style: HatStyle | 'hood', color: string, private readonly R: number, private readonly goo: GooHead) {
+  /** How far round it's turned about the head's up axis (π: on backwards). */
+  private readonly turn: number;
+
+  constructor(readonly style: HatStyle | 'hood', color: string, private readonly R: number, private readonly goo: GooHead, backwards = false) {
+    this.turn = backwards ? Math.PI : 0;
     this.material = new THREE.MeshStandardMaterial({ color, roughness: style === 'tophat' ? 0.45 : 0.85 });
     // Trim: a cuff, a band or a button, a little darker (a top hat's band is dark).
     this.trim = new THREE.MeshStandardMaterial({ color: style === 'tophat' ? '#1b1b2f' : color, roughness: 0.8 });
@@ -105,6 +109,7 @@ export class Hat {
   /** A part that hugs the goo, tipped back (−) or forward (+) about x. */
   private hug(geo: THREE.BufferGeometry, material: THREE.Material, tip: number): void {
     geo.rotateX(tip);
+    if (this.turn) geo.rotateY(this.turn);
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const rest = new Float32Array(pos.array as Float32Array);
     const ride = new Uint16Array(pos.count);
@@ -119,6 +124,10 @@ export class Hat {
   }
 
   private ride(obj: THREE.Object3D, at: THREE.Vector3): void {
+    if (this.turn) {
+      at.applyAxisAngle(Y, this.turn);
+      obj.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(Y, this.turn));
+    }
     obj.position.copy(at);
     obj.traverse((o) => { o.castShadow = true; });
     this.root.add(obj);
@@ -235,3 +244,4 @@ export class Hat {
 }
 
 const X = new THREE.Vector3(1, 0, 0);
+const Y = new THREE.Vector3(0, 1, 0);

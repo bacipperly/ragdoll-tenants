@@ -147,6 +147,6 @@ export function randomRecipe(base: Recipe, rand: () => number = Math.random): Re
     mood: moods[Math.floor(r() * moods.length)],
     traits: { age: round(age), weight: round(Math.max(-1, Math.min(1, bell() * 0.7))), fitness: round(Math.max(-1, Math.min(1, bell() * 0.7))) },
     proportions,
-    outfit: randomOutfit(r),
+    outfit: randomOutfit(r, age),
   };
 }

@@ -8,7 +8,7 @@ export type { ActiveRagdollOptions } from './ActiveRagdoll';
 export { RAPIER };
 export type { Recipe } from './recipe';
 export { parseRecipe, randomRecipe, recipeFromEditor, loadIntoEditor, sameLook, TENANT_YELLOW } from './recipe';
-export { HAT_STYLES, SHIRT_PATTERNS, TATTOO_SHAPES, TATTOO_SPOTS, NO_OUTFIT, randomOutfit, type HatStyle, type Outfit, type ShirtPattern } from './outfit';
+export { GLASSES_STYLES, ACCESSORY_KEYS, HAT_STYLES, SHIRT_PATTERNS, TATTOO_SHAPES, TATTOO_SPOTS, NO_OUTFIT, randomOutfit, type GlassesStyle, type HatStyle, type Outfit, type ShirtPattern } from './outfit';
 export { HAT } from './hat';
 export { Accents, ACCENT_KINDS, ACTIVITIES, type AccentKind, type Activity, type AccentSubject } from './accents';
 
@@ -85,3 +85,4 @@ export class RagdollPhysics {
     return steps;
   }
 }
+export { LIFE_STAGES, lifeStage, dressForStage, type LifeStage } from './lifeStages';

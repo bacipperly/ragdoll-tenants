@@ -17,6 +17,7 @@ import type { ActiveRagdoll } from './ragdoll';
 import { EXPRESSION_NAMES, FACE_LETTERS, LETTER_RANGE, MOOD_NAMES, MOODS, NEUTRAL, POSTURE_LETTERS, expressionLabel, type ExpressionName, type Letter, type MoodName } from './ragdoll/mood';
 import { TRAITS } from './ragdoll/config';
 import { ageName, TRAIT_PRESETS } from './ragdoll/traits';
+import { dressForStage, LIFE_STAGES } from './ragdoll/lifeStages';
 import { GESTURE_NAMES } from './ragdoll/gestures';
 import {
   applyTuning, codeDefault, currentTuning, feelOnly, getSavedTuning, getTunable, isTunable, onSavedTuningChanged,
@@ -219,7 +220,7 @@ export interface TunerHost {
  * The Traits section: age, weight and fitness, which each drive many other settings
  * (see traits.ts), with one-click starting points. Changing them rebuilds the ragdoll.
  */
-function addTraitsSection(gui: GUI, refresh: () => void): void {
+function addTraitsSection(gui: GUI, host: TunerHost, refresh: () => void): void {
   const folder = gui.addFolder('Traits');
   const t = TRAITS as Record<string, number>;
   const age = folder.add(t, 'age', 0, 1, 0.01);
@@ -228,6 +229,17 @@ function addTraitsSection(gui: GUI, refresh: () => void): void {
   nameAge();
   folder.add(t, 'weight', -1, 1, 0.01).name('weight: slim ↔ heavy').onChange(refresh);
   folder.add(t, 'fitness', -1, 1, 0.01).name('fitness: soft ↔ athletic').onChange(refresh);
+  // Life stages: the age, plus the accessories that tell it (a pacifier, a backpack, a cane…).
+  const stages = folder.addFolder('Life stages');
+  for (const st of LIFE_STAGES) {
+    stages.add({ go: () => {
+      const r = host.ragdoll();
+      r.setOutfit(dressForStage(r.recipe.outfit, st));
+      Object.assign(t, st.traits);
+      nameAge();
+      refresh();
+    } }, 'go').name(`${st.name} (${st.years})`);
+  }
   const presets = folder.addFolder('Presets');
   for (const [name, values] of Object.entries(TRAIT_PRESETS)) {
     presets.add({ go: () => { Object.assign(t, values); nameAge(); refresh(); } }, 'go').name(name);
@@ -354,7 +366,7 @@ export function createTuner(host: TunerHost): GUI {
   const statusCtrl = gui.add(status, 'text').name('').disable();
 
   host.addSections?.(gui);
-  addTraitsSection(gui, refresh);
+  addTraitsSection(gui, host, refresh);
   addMoodSection(gui, host, refresh, refresh);
   // Reactions: one button per gesture (number keys play the common ones).
   const reactions = gui.addFolder('Reactions');

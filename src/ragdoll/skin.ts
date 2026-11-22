@@ -144,7 +144,7 @@ const lashGeometry = new THREE.CapsuleGeometry(0.5, 1, 2, 5).rotateZ(Math.PI / 2
 /** Where on each eye's top edge the lashes grow (radians from "outward", toward "up"), and how long each is. */
 const LASHES = [[0.35, 0.8], [0.75, 1], [1.15, 0.85]] as const;
 const DEFAULT_FACE: FaceShape = { eyeSize: 1, eyeSpacing: 1, eyeHeight: 0, lashes: 0, blush: 0, mouthWidth: 1 };
-const MOUTH_Y = -0.058;
+export const MOUTH_Y = -0.058;
 /** The open eye's half-sizes, before the character's eye size. */
 const EYE = { w: 0.024, h: 0.054 }; // tall glossy ovals, as on the reference sheet
 
@@ -437,6 +437,23 @@ export class Face {
     this.riding.clear();
     for (const [obj, base] of this.bases) this.riding.set(obj, goo.nearestVertex(base));
     this.followSurface();
+  }
+
+  /**
+   * Wears something on the face (glasses, a mustache…): it's laid out in the face's units
+   * (head radius 0.2) at its own position, and rides the goo like the drawn pieces do.
+   */
+  wear(obj: THREE.Object3D): void {
+    this.root.add(obj);
+    const base = obj.position.clone();
+    this.bases.set(obj, base);
+    if (this.goo) this.riding.set(obj, this.goo.nearestVertex(base));
+  }
+
+  unwear(obj: THREE.Object3D): void {
+    obj.removeFromParent();
+    this.bases.delete(obj);
+    this.riding.delete(obj);
   }
 
   /** Puts every piece at its base spot plus the goo's offset there. */

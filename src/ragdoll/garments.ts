@@ -17,7 +17,7 @@ const RINGS = 7;
 const AROUND = 36;
 
 /** The skin's radius at height y (its profile is [height, radius] pairs, bottom up). */
-function profileRadius(profile: readonly (readonly [number, number])[], y: number): number {
+export function profileRadius(profile: readonly (readonly [number, number])[], y: number): number {
   for (let i = 1; i < profile.length; i++) {
     const [h0, r0] = profile[i - 1], [h1, r1] = profile[i];
     if (y >= h0 && y <= h1) return r0 + (r1 - r0) * ((y - h0) / Math.max(1e-6, h1 - h0));

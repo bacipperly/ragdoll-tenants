@@ -4,6 +4,7 @@ import { blendedSkin, type Shape } from './blendskin';
 import type { BodyDims, FaceShape } from './proportions';
 import { NEUTRAL, type FaceLetter, type Letters } from './mood';
 import type { GooHead } from './goo';
+import { bodyModel, buildImportedSkin, type Capsule } from './bodyModel';
 
 /*
  * The character's skin: one smooth mesh draped over the physics skeleton.
@@ -33,22 +34,28 @@ const skins = new Map<string, { geometry: THREE.BufferGeometry; users: number }>
  * The skin for a body of these dimensions: shared by every ragdoll of the same shape.
  * Call releaseSkin with the same dims when the ragdoll goes away.
  */
-export function acquireSkin(bone: BoneIndex, dims: BodyDims): THREE.BufferGeometry {
-  let entry = skins.get(dims.key);
+export function acquireSkin(bone: BoneIndex, dims: BodyDims, capsules: Capsule[] = []): THREE.BufferGeometry {
+  // An imported body model (bodyModel.ts), if one's set, else the generated skin.
+  const model = capsules.length ? bodyModel() : null;
+  const key = skinKey(dims, model?.name);
+  let entry = skins.get(key);
   if (!entry) {
-    entry = { geometry: buildSkin(bone, dims), users: 0 };
-    skins.set(dims.key, entry);
+    entry = { geometry: model ? buildImportedSkin(model, dims, capsules) : buildSkin(bone, dims), users: 0 };
+    skins.set(key, entry);
   }
   entry.users++;
   return entry.geometry;
 }
 
-export function releaseSkin(dims: BodyDims): void {
-  const entry = skins.get(dims.key);
+const skinKey = (dims: BodyDims, model?: string) => (model ? `${dims.key}|${model}` : dims.key);
+
+export function releaseSkin(dims: BodyDims, model?: string): void {
+  const key = skinKey(dims, model);
+  const entry = skins.get(key);
   if (!entry) return;
   if (--entry.users <= 0) {
     entry.geometry.dispose();
-    skins.delete(dims.key);
+    skins.delete(key);
   }
 }
 

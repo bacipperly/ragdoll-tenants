@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Accents, ACCENT_KINDS, ACTIVITIES, ActiveRagdoll, RagdollPhysics, RAPIER, type Activity } from './ragdoll';
+import { Accents, ACCENT_KINDS, ACTIVITIES, ActiveRagdoll, RagdollPhysics, RAPIER, loadBodyModel, setBodyModel, type Activity } from './ragdoll';
 import { bodyDims } from './ragdoll/proportions';
 import { TRAITS } from './ragdoll/config';
 import { ageName } from './ragdoll/traits';
@@ -96,6 +96,23 @@ resize();
 
 // ---- Physics + world ----
 const physics = await RagdollPhysics.create();
+
+// Which body: the generated one, or an imported model (?model=<name> loads
+// models/<name>.glb, plus models/<name>.json for its settings; see bodyModel.ts).
+const MODEL = new URLSearchParams(location.search).get('model');
+let modelNote = '';
+if (MODEL && MODEL !== 'procedural') {
+  try {
+    const m = await loadBodyModel(`./models/${MODEL}.glb`);
+    setBodyModel(m);
+    const guessed = Object.entries(m.found).filter(([, how]) => how === 'guessed').map(([k]) => k);
+    modelNote = `body      ${MODEL}.glb (${m.index.length / 3} triangles${guessed.length ? `, guessed: ${guessed.join(', ')}` : ''})\n`;
+    console.info('[body model]', m.name, { landmarks: m.landmarks, found: m.found, armAngleDeg: (m.armAngle * 57.3).toFixed(1), legAngleDeg: (m.legAngle * 57.3).toFixed(1) });
+  } catch (err) {
+    modelNote = `body      couldn't load models/${MODEL}.glb, using the generated body\n`;
+    console.warn('[body model]', err);
+  }
+}
 const world = physics.world;
 
 const floorMat = new THREE.MeshStandardMaterial({ color: '#e8e1d5', roughness: 0.95 });
@@ -334,7 +351,7 @@ function frame(now: number) {
 
   const s = ragdoll.debugState();
   hud.innerHTML =
-    `<b>Active ragdoll POC</b>   you: <b>${ragdoll.recipe.name}</b>   tenants: ${crowd.tenants.length}\n` +
+    `<b>Active ragdoll POC</b>   you: <b>${ragdoll.recipe.name}</b>   tenants: ${crowd.tenants.length}\n` + modelNote +
     `Click a tenant to be them\n` +
     `WASD  walk (camera-relative)   Shift  run\n` +
     `K     knockout / get up        F      shove\n` +

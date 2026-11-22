@@ -3,6 +3,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { BODY, BUTT, CARRY, CLUMSY, CRAWL, EMOTION, GAIT, GETUP, GRAVITY_COMP, HOVER, JUMP, KNOCKOUT, LIMITS, MOVE, MUSCLES, UPRIGHT } from './config';
 import { GooHead, type GooContact } from './goo';
 import { Face, acquireSkin, releaseSkin } from './skin';
+import { bodyModel, type Capsule } from './bodyModel';
 import { bodyDims, type BodyDims } from './proportions';
 import { EXPRESSION_NAMES, MoodBlender, MOOD_NAMES, type ExpressionName, type MoodName, type ReactionName } from './mood';
 import type { AccentSubject, Activity } from './accents';
@@ -253,6 +254,8 @@ export class ActiveRagdoll implements AccentSubject {
   readonly material: THREE.MeshStandardMaterial;
   /** The skin. Also what a mouse click should raycast against. */
   readonly skin: THREE.SkinnedMesh;
+  /** The imported body model its skin was built from (undefined: the generated skin). */
+  private skinModel: string | undefined;
 
   private readonly world: RAPIER.World;
   /** This ragdoll's size and shape, fixed when it's created (from PROPORTIONS and TRAITS). */
@@ -567,7 +570,12 @@ export class ActiveRagdoll implements AccentSubject {
     const skeleton = new THREE.Skeleton(bones, boneInverses);
     const boneIndex = (name: string) =>
       name === 'butt' ? defs.length : name === '__count' ? defs.length + 1 : defs.findIndex((d) => d.name === name);
-    this.skin = new THREE.SkinnedMesh(acquireSkin(boneIndex, this.dims), this.material);
+    // The capsules, for fitting an imported body model to this skeleton (bodyModel.ts).
+    const capsules: Capsule[] = defs.map((d, i) => ({
+      name: d.name, bone: i, cx: d.center.x, cy: d.center.y, cz: d.center.z, half: d.halfHeight, r: d.radius,
+    }));
+    this.skinModel = bodyModel()?.name;
+    this.skin = new THREE.SkinnedMesh(acquireSkin(boneIndex, this.dims, capsules), this.material);
     this.skin.bind(skeleton, new THREE.Matrix4());
     this.skin.castShadow = true;
     this.skin.receiveShadow = true;
@@ -1605,7 +1613,7 @@ export class ActiveRagdoll implements AccentSubject {
     this.accessories?.dispose();
     this.hair?.dispose();
     disposeMesh(this.hood);
-    releaseSkin(this.dims);
+    releaseSkin(this.dims, this.skinModel);
     this.group.removeFromParent();
   }
 

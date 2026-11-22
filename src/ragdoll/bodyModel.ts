@@ -381,24 +381,27 @@ export function ourBoneForRigBone(name: string): string {
 type ProportionKey = keyof typeof PROPORTIONS;
 
 /**
- * Multipliers on our proportions so a standard adult comes out shaped like the model:
- * the same head size (and height on the body), leg length, body width, fin length and
- * thickness, leg thickness, and where the fins and legs join, all as shares of the
- * height. Babies, elders and every slider still work on top of this. Needs a segmented
- * model (null otherwise). Solved by repeatedly nudging each multiplier by how far off
- * its measurement is, since they interact (longer legs lift the head, and so on).
+ * Multipliers on our proportions so a standard adult's skeleton matches the model: the
+ * same head size (the goo head replaces the model's), hip, shoulder and neck heights,
+ * fin length, and where the fins and legs join, all as shares of the height. Babies,
+ * elders and every slider still work on top of this. Needs a segmented model (null
+ * otherwise). Solved by repeatedly nudging each multiplier by how far off its
+ * measurement is, since they interact (longer legs lift the head, and so on).
+ *
+ * Thickness (body width, fin width, leg thickness) is left alone on purpose: the
+ * model's mesh supplies the shape, and fat capsules only make stiff physics (short,
+ * thick legs become two balls with no knee to speak of).
  */
 export function calibrate(m: BodyModel): Partial<Record<ProportionKey, number>> | null {
   const M = m.measures;
   if (!M || !M.height) return null;
   const H = M.height, L = m.landmarks;
   const adult = { age: 0.5, weight: 0, fitness: 0 };
-  const f: Partial<Record<ProportionKey, number>> = { headSize: 1, legLength: 1, bodyHeight: 1, bodyWidth: 1, finLength: 1, finWidth: 1, legThickness: 1, shoulderWidth: 1, hipWidth: 1 };
-  const maxR = (p: readonly (readonly [number, number])[]) => Math.max(...p.map(([, r]) => r));
+  const f: Partial<Record<ProportionKey, number>> = { headSize: 1, legLength: 1, bodyHeight: 1, finLength: 1, shoulderWidth: 1, hipWidth: 1 };
   setProportionCalibration({});
   const want = {
-    head: (2 * M.headRadius) / H, hip: M.hip / H, neck: (L.neck - L.feet) / H, torso: M.torsoHalfWidth / H,
-    finLen: M.finLength / H, finW: M.finHalfWidth / H, legW: M.legHalfWidth / H, finX: M.finRootX / H, legX: M.legX / H,
+    head: (2 * M.headRadius) / H, hip: M.hip / H, neck: (L.neck - L.feet) / H,
+    finLen: M.finLength / H, finX: M.finRootX / H, legX: M.legX / H,
   };
   const clamp = (k: ProportionKey) => { f[k] = Math.min(4, Math.max(0.25, f[k]!)); };
   for (let it = 0; it < 12; it++) {
@@ -411,10 +414,7 @@ export function calibrate(m: BodyModel): Partial<Record<ProportionKey, number>> 
     nudge('headSize', want.head, (2 * D.headR) / h);
     nudge('legLength', want.hip, D.hipY / h);
     nudge('bodyHeight', want.neck - want.hip, (D.headY - D.headR - D.hipY) / h);
-    nudge('bodyWidth', want.torso, maxR(D.skin.body) / h, 0.8);
     if (want.finLen) nudge('finLength', want.finLen, (D.upperArmLen + D.forearmLen + D.forearmR) / h, 0.8);
-    if (want.finW) nudge('finWidth', want.finW, maxR(D.skin.arm) / h, 0.8);
-    if (want.legW) nudge('legThickness', want.legW, maxR(D.skin.leg) / h, 0.8);
     if (want.finX) nudge('shoulderWidth', want.finX, D.shoulderX / h, 0.6);
     if (want.legX) nudge('hipWidth', want.legX, D.hipX / h, 0.6);
   }
@@ -536,6 +536,24 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
     const soft = 0.15 * D.bellyR; // how far a bone's pull reaches past the nearest one: small keeps limbs crisp
     let sum = 0;
     for (let s = 0; s < segs.length; s++) { w[s] = Number.isFinite(d[s]) ? Math.exp(-(d[s] - dMin) / soft) : 0; sum += w[s]; }
+    // A limb part: weighted along the limb, as a rig would be. The upper bone down to the
+    // elbow or knee, the lower bone past it (blended across the joint), and the body
+    // only right at the root, so the limb follows its bones and bends at a clear joint.
+    const chain = role === 'finL' || role === 'finR' || role === 'legL' || role === 'legR' ? role : null;
+    if (chain && m.weights !== 'rig') {
+      const fin = chain.startsWith('fin'), sd = chain.endsWith('L') ? 'L' : 'R';
+      const up = segByName.get(fin ? `upperArm${sd}` : `thigh${sd}`)!, low = segByName.get(fin ? `forearm${sd}` : `shin${sd}`)!;
+      const root = segByName.get(fin ? 'chest' : 'torso')!;
+      const lb = segs[up].limb!, a = lb.side * lb.angle;
+      const dx = Math.sin(a), dy = -Math.cos(a); // down the limb, as the model holds it
+      const t = (x - lb.px) * dx + (y - lb.py) * dy;
+      const upperLen = fin ? D.upperArmLen : D.thighLen;
+      const lower = THREE.MathUtils.smoothstep(t, upperLen * 0.6, upperLen * 1.4);
+      const body = 1 - THREE.MathUtils.smoothstep(t, -0.1 * upperLen, 0.35 * upperLen);
+      w.fill(0);
+      w[low] = (1 - body) * lower; w[up] = (1 - body) * (1 - lower); w[root] = body;
+      sum = 1;
+    }
     if (m.weights === 'rig' && m.rig) {
       // The model's own rig instead: its bones' weights, summed onto ours by name.
       w.fill(0); sum = 0;

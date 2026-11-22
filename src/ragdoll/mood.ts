@@ -47,7 +47,17 @@ export const FACE_LETTERS = [
   'blush', // 0..1 rosy cheeks (on top of any blush in the character's look)
   'lopsided', // −1..1 one eye squints harder and its brow drops, the other opens and lifts (concentrating)
   'mouthShift', // −1..1 the mouth slides off to one side, scrunched and tilted
-  'tongue', // 0..1 the tip of the tongue pokes out of the corner of the mouth
+  'tongue', // 0..1 the tip of the tongue pokes out (of the corner the mouth slid to, or the middle)
+  'eyeSmile', // 0..1 eyes squeezed shut into happy upward arcs (^ ^)
+  'eyeClose', // 0..1 eyes gently shut in relaxed downward curves (‿ ‿)
+  'wink', // −1..1 one eye shut in a happy arc: +1 its left eye (on the viewer's right), −1 its right
+  'squeeze', // 0..1 eyes screwed shut into chevrons (> <)
+  'heartEyes', // 0..1 the eyes become red hearts
+  'starEyes', // 0..1 the eyes become outlined stars
+  'spiralEyes', // 0..1 the eyes become dizzy spirals
+  'sparkleEyes', // 0..1 each eye's glint grows into a big four-pointed sparkle (in awe)
+  'teeth', // 0..1 a boxy grimace showing gritted teeth
+  'wavy', // 0..1 a wobbly, queasy mouth
 ] as const;
 
 export type PostureLetter = (typeof POSTURE_LETTERS)[number];
@@ -62,9 +72,14 @@ export type Letters = Record<Letter, number>;
 /** The plain, content character as drawn. */
 export const NEUTRAL: Letters = Object.fromEntries(LETTERS.map((l) => [l, l === 'smile' ? 1 : 0])) as Letters;
 
+const UNSIGNED: readonly Letter[] = [
+  'sway', 'tremble', 'fidget', 'mouthOpen', 'browShow', 'blush', 'tongue',
+  'eyeSmile', 'eyeClose', 'squeeze', 'heartEyes', 'starEyes', 'spiralEyes', 'sparkleEyes', 'teeth', 'wavy',
+];
+
 /** Each letter's range, for sliders. */
 export const LETTER_RANGE: Record<Letter, [number, number]> = Object.fromEntries(
-  LETTERS.map((l) => [l, ['sway', 'tremble', 'fidget', 'mouthOpen', 'browShow', 'blush', 'tongue'].includes(l) ? [0, 1] : [-1, 1]]),
+  LETTERS.map((l) => [l, l === 'wink' || !UNSIGNED.includes(l) ? [-1, 1] : [0, 1]]),
 ) as Record<Letter, [number, number]>;
 
 /** The moods. Spelled with letters; tweak these to change how a mood reads. */
@@ -143,6 +158,68 @@ export const REACTIONS = {
 } satisfies Record<string, Word>;
 
 export type ReactionName = keyof typeof REACTIONS;
+
+/**
+ * The expression library (the character sheet's faces): face-only words. One can be laid
+ * over the mood, replacing its face (any face letter an expression leaves out goes back
+ * to the plain face); the body keeps the mood's posture. Reactions still show on top.
+ */
+export const EXPRESSIONS = {
+  // Foundational
+  neutral: {},
+  happy: { eyeSmile: 1, smile: 1, mouthOpen: 0.8 },
+  excited: { eyeOpen: 0.6, smile: 1, mouthOpen: 0.8, browShow: 0.6, browHeight: 0.8 },
+  surprised: { eyeOpen: 0.8, smile: 0, mouthOpen: 0.55, browShow: 0.7, browHeight: 1 },
+  delighted: { eyeSmile: 1, smile: 1, blush: 0.25 },
+  laughing: { eyeSmile: 1, smile: 1, mouthOpen: 1, browShow: 0.4, browHeight: 0.6 },
+  winkLeft: { wink: 1, smile: 0.9 },
+  winkRight: { wink: -1, smile: 0.9 },
+  content: { eyeClose: 1, smile: 0.9 },
+  relaxed: { eyeClose: 1, smile: 1, mouthOpen: 0.65 },
+  // Cognitive
+  thinking: { gazeX: 0.6, gazeY: 0.8, smile: 0.5, eyeOpen: 0.2, browShow: 0.6, browHeight: 0.5, lopsided: -0.25 },
+  curious: { eyeOpen: 0.5, gazeX: -0.3, gazeY: 0.6, smile: 0, mouthOpen: 0.35, browShow: 0.7, browHeight: 0.7 },
+  confused: { lopsided: 0.6, browShow: 1, browAngle: 0.3, mouthShift: 0.6, smile: -0.3, gazeY: 0.3 },
+  puzzled: { eyeOpen: 0.3, gazeX: 0.4, gazeY: 0.4, smile: -0.5, browShow: 0.9, browHeight: 0.3, browAngle: -0.6 },
+  determined: { eyeOpen: -0.1, smile: 0.8, browShow: 1, browHeight: -0.4, browAngle: 1 },
+  focused: { eyeOpen: -0.2, smile: 0, browShow: 1, browHeight: -0.5, browAngle: 0.8 },
+  serious: { eyeOpen: -0.1, smile: 0 },
+  // Emotional
+  concerned: { eyeOpen: 0.4, smile: -0.6, browShow: 0.9, browHeight: 0.4, browAngle: -0.8 },
+  worried: { eyeOpen: 0.3, smile: -0.7, mouthOpen: 0.45, browShow: 1, browHeight: 0.4, browAngle: -0.9 },
+  anxious: { eyeOpen: 0.5, smile: -0.8, mouthOpen: 0.6, wavy: 0.8, browShow: 1, browHeight: 0.6, browAngle: -1 },
+  sad: { eyeOpen: -0.2, gazeY: -0.4, smile: -0.9, browShow: 1, browAngle: -1 },
+  disappointed: { eyeClose: 1, smile: -0.8, browShow: 0.4, browAngle: -0.6 },
+  frustrated: { squeeze: 1, smile: -0.8 },
+  angry: { eyeOpen: -0.2, smile: -0.8, mouthOpen: 0.55, browShow: 1, browHeight: -0.6, browAngle: 1 },
+  furious: { eyeOpen: -0.35, smile: -1, mouthOpen: 1, browShow: 1, browHeight: -0.8, browAngle: 1 },
+  embarrassed: { eyeOpen: 0.1, gazeX: 0.5, gazeY: -0.3, smile: 0.6, wavy: 0.5, blush: 1 },
+  proud: { eyeClose: 1, smile: 0.8, mouthShift: 0.35, browShow: 0.8, browHeight: 0.8 },
+  smug: { eyeOpen: -0.55, gazeX: 0.3, smile: 0.6, mouthShift: 0.5, browShow: 0.6, browHeight: -0.1, browAngle: 0.3 },
+  love: { heartEyes: 1, smile: 1, mouthOpen: 0.75 },
+  // Playful and reactive
+  silly: { eyeOpen: 0.3, smile: 0.9, tongue: 1 },
+  amazed: { eyeOpen: 0.9, smile: 0, mouthOpen: 0.7, browShow: 0.6, browHeight: 1 },
+  inAwe: { sparkleEyes: 1, eyeOpen: 0.6, smile: 0, mouthOpen: 0.5 },
+  starstruck: { starEyes: 1, smile: 1, mouthOpen: 0.8 },
+  sleepy: { eyeClose: 1, gazeY: -0.3, smile: 0, mouthOpen: 0.35 },
+  tired: { eyeOpen: -0.7, gazeY: -0.2, smile: 0 },
+  relieved: { eyeClose: 1, smile: 0.8 },
+  sick: { eyeOpen: -0.4, gazeY: -0.3, smile: -0.3, wavy: 1, browShow: 0.7, browAngle: -0.7 },
+  nervous: { eyeOpen: 0.4, smile: -0.2, teeth: 1, browShow: 0.9, browHeight: 0.5, browAngle: -0.8 },
+  baffled: { spiralEyes: 1, smile: 0, mouthOpen: 0.5 },
+  playful: { eyeSmile: 1, smile: 1, tongue: 1 },
+} satisfies Record<string, Word>;
+
+export type ExpressionName = keyof typeof EXPRESSIONS;
+export const EXPRESSION_NAMES = Object.keys(EXPRESSIONS) as ExpressionName[];
+/** The sheet's name for each expression ("winkLeft" → "Wink (left)"). */
+export function expressionLabel(n: ExpressionName): string {
+  if (n === 'winkLeft') return 'Wink (left)';
+  if (n === 'winkRight') return 'Wink (right)';
+  if (n === 'inAwe') return 'In awe';
+  return n[0].toUpperCase() + n.slice(1);
+}
 const REACTION_NAMES = Object.keys(REACTIONS) as ReactionName[];
 
 /**
@@ -162,6 +239,9 @@ export class MoodBlender {
    * the base layer every mood is added on top of.
    */
   base: Word = {};
+  /** An expression laid over the mood's face, or null for the mood's own. */
+  expression: ExpressionName | null = null;
+  private readonly exprWeights = new Map<ExpressionName, number>(EXPRESSION_NAMES.map((e) => [e, 0]));
 
   /**
    * Runs every physics step for every ragdoll, so it only visits moods and reactions
@@ -186,6 +266,18 @@ export class MoodBlender {
       if (w === 0) continue;
       const word = MOODS[m] as Word;
       for (const l in word) out[l as Letter] += (word[l as Letter]! - NEUTRAL[l as Letter]) * w * moodShare;
+    }
+    // The expression replaces the mood's face (crossfading like a mood does).
+    for (const e of EXPRESSION_NAMES) {
+      const want = e === this.expression ? 1 : 0;
+      let w = this.exprWeights.get(e)!;
+      w += (want - w) * Math.min(1, dt * 8);
+      if (w < 1e-4 && want === 0) w = 0;
+      this.exprWeights.set(e, w);
+      if (w === 0) continue;
+      const word = EXPRESSIONS[e] as Word;
+      const k = w * moodShare;
+      for (const l of FACE_LETTERS) out[l] += ((word[l] ?? NEUTRAL[l]) - out[l]) * k;
     }
     for (const r of REACTION_NAMES) {
       const w = reactions[r];

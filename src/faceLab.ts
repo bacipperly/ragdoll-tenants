@@ -1,5 +1,6 @@
 /*
  * Face lab (dev only, face-lab.html): tenant heads seen face-on, for working on the face.
+ *   #library      the expression library (the character sheet's faces), in the sheet's order
  *   #moods        every mood and reaction, plus asleep and mid-blink
  *   #transitions  strips from calm into each expression, to see how pieces appear and go
  *   #live         one big head drifting through the moods and blinking, as in the game
@@ -7,7 +8,8 @@
 import * as THREE from 'three';
 import { Face } from './ragdoll/skin';
 import { BODY } from './ragdoll/config';
-import { MOODS, NEUTRAL, REACTIONS, LETTERS, type Letters, type Word } from './ragdoll/mood';
+import { EXPRESSIONS, EXPRESSION_NAMES, MOODS, NEUTRAL, REACTIONS, LETTERS, expressionLabel, type Letters, type Word } from './ragdoll/mood';
+import { TENANT_YELLOW } from './ragdoll/recipe';
 import type { FaceShape } from './ragdoll/proportions';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -16,7 +18,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xcfd8dc);
+scene.background = new THREE.Color(0xe9e7e3);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8a9aa0, 1.6));
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(1, 2, 3);
@@ -27,7 +29,7 @@ const labels = document.getElementById('labels')!;
 
 const R = BODY.headR;
 const headGeometry = new THREE.SphereGeometry(R, 48, 32);
-const COLORS = [0x4f86f7, 0xffb4a2, 0x7bd389, 0xf4a259, 0xb28dff, 0xf2d0a4];
+const COLORS = [new THREE.Color(TENANT_YELLOW).getHex()];
 const SHAPES: FaceShape[] = [
   { eyeSize: 1, eyeSpacing: 1, eyeHeight: 0, lashes: 0, blush: 0, mouthWidth: 1 },
   { eyeSize: 1.2, eyeSpacing: 0.9, eyeHeight: 0.05, lashes: 1, blush: 0.6, mouthWidth: 0.8 },
@@ -51,7 +53,7 @@ function addHead(x: number, y: number, size: number, label: string, l: Letters, 
   const group = new THREE.Group();
   group.position.set(x, y, 0);
   group.scale.setScalar(size);
-  const head = new THREE.Mesh(headGeometry, new THREE.MeshStandardMaterial({ color: COLORS[i % COLORS.length], roughness: 0.7 }));
+  const head = new THREE.Mesh(headGeometry, new THREE.MeshStandardMaterial({ color: COLORS[i % COLORS.length], roughness: 0.5 }));
   group.add(head);
   const face = new Face(R, SHAPES[0], i % 2 ? -1 : 1);
   group.add(face.root);
@@ -108,7 +110,7 @@ function placeLabels(): void {
   }
 }
 
-const EXPRESSIONS: { label: string; word: Word; awake?: number }[] = [
+const MOOD_FACES: { label: string; word: Word; awake?: number }[] = [
   ...Object.entries(MOODS).filter(([n]) => n !== 'custom').map(([label, word]) => ({ label, word })),
   ...Object.entries(REACTIONS).map(([label, word]) => ({ label: `${label} (reaction)`, word })),
   { label: 'mid-blink', word: {}, awake: -1 },
@@ -137,11 +139,13 @@ function show(page: string): void {
       items.push({ label: s === 0 ? 'awake 1 → 0' : `${(1 - t).toFixed(2)}`, l: NEUTRAL, awake: 1 - t });
     }
     grid(items, steps);
+  } else if (page === 'library') {
+    grid(EXPRESSION_NAMES.map((n) => ({ label: expressionLabel(n), l: letters(EXPRESSIONS[n] as Word) })), 8);
   } else if (page === 'live') {
     live = addHead(0, 0, 4, '', { ...NEUTRAL });
     fit(4 * 2.4 * R, 4 * 2.4 * R);
   } else {
-    grid(EXPRESSIONS.map((e) => ({ label: e.label, l: letters(e.word), awake: e.awake })), 5);
+    grid(MOOD_FACES.map((e) => ({ label: e.label, l: letters(e.word), awake: e.awake })), 5);
   }
   for (const b of document.querySelectorAll<HTMLButtonElement>('#controls button')) {
     b.style.fontWeight = b.dataset.page === page ? '700' : '400';
@@ -151,10 +155,10 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('#controls button')
   b.onclick = () => { location.hash = b.dataset.page!; };
 }
 window.addEventListener('hashchange', () => show(location.hash.slice(1)));
-show(location.hash.slice(1) || 'moods');
+show(location.hash.slice(1) || 'library');
 
 // Live: drift from one expression to the next, with blinks, at the game's pace.
-const order = EXPRESSIONS.filter((e) => e.awake === undefined).map((e) => letters(e.word));
+const order = EXPRESSION_NAMES.map((n) => letters(EXPRESSIONS[n] as Word));
 let from = { ...NEUTRAL }, to = order[0], t = 0, idx = 0, blink = 0, nextBlink = 2, time = 0;
 let last = performance.now();
 function frame(now: number): void {

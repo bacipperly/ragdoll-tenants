@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Face Lab</title>
     <style>
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #cfd8dc; font-family: system-ui, sans-serif; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #e9e7e3; font-family: system-ui, sans-serif; }
       canvas { display: block; }
       #labels { position: fixed; inset: 0; pointer-events: none; }
       #labels div { position: absolute; transform: translateX(-50%); font-size: 11px; color: #37474f; white-space: nowrap; }
@@ -16,6 +16,7 @@
   <body>
     <div id="labels"></div>
     <div id="controls">
+      <button data-page="library">Library</button>
       <button data-page="moods">Moods</button>
       <button data-page="strips">Transitions</button>
       <button data-page="live">Live</button>

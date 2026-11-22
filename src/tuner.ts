@@ -14,7 +14,7 @@
 import GUI from 'lil-gui';
 import { MUSCLES } from './ragdoll/config';
 import type { ActiveRagdoll } from './ragdoll';
-import { FACE_LETTERS, LETTER_RANGE, MOOD_NAMES, MOODS, NEUTRAL, POSTURE_LETTERS, type Letter, type MoodName } from './ragdoll/mood';
+import { EXPRESSION_NAMES, FACE_LETTERS, LETTER_RANGE, MOOD_NAMES, MOODS, NEUTRAL, POSTURE_LETTERS, expressionLabel, type ExpressionName, type Letter, type MoodName } from './ragdoll/mood';
 import { TRAITS } from './ragdoll/config';
 import { ageName, TRAIT_PRESETS } from './ragdoll/traits';
 import { GESTURE_NAMES } from './ragdoll/gestures';
@@ -257,6 +257,14 @@ function addMoodSection(gui: GUI, host: TunerHost, refresh: () => void, onChange
   folder.add(state, 'mood', MOOD_NAMES).name('mood (M key cycles)').onChange(apply).listen();
   folder.add(state, 'strength', 0, 1, 0.01).name('strength').onChange(apply);
   folder.add(state, 'copyToCustom').name('✎ Start custom from this mood');
+  // The expression library: a face laid over the mood (X cycles them).
+  const MOOD_FACE = '(the mood\'s own)';
+  const faces: Record<string, string> = { [MOOD_FACE]: '' };
+  for (const n of EXPRESSION_NAMES) faces[expressionLabel(n)] = n;
+  const face = { expression: '' };
+  folder.add(face, 'expression', faces).name('face (X key cycles)').listen()
+    .onChange((v: string) => host.ragdoll().setExpression((v || null) as ExpressionName | null));
+  setInterval(() => { face.expression = host.ragdoll().expression ?? ''; }, 250);
 
   // The letters of the custom mood. Pick "custom" above to see them.
   const custom = MOODS.custom as Record<Letter, number>;

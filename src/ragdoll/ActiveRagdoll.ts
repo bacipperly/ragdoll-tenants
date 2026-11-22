@@ -4,7 +4,7 @@ import { BODY, BUTT, CARRY, CLUMSY, EMOTION, GAIT, GETUP, GRAVITY_COMP, HOVER, J
 import { GooHead, type GooContact } from './goo';
 import { Face, acquireSkin, releaseSkin } from './skin';
 import { bodyDims, type BodyDims } from './proportions';
-import { MoodBlender, MOOD_NAMES, type MoodName } from './mood';
+import { EXPRESSION_NAMES, MoodBlender, MOOD_NAMES, type ExpressionName, type MoodName } from './mood';
 import { traitEffects, type TraitEffects } from './traits';
 import { recipeFromEditor, TENANT_YELLOW, type Recipe } from './recipe';
 import { OutfitPainter, parseOutfit, type Outfit } from './outfit';
@@ -815,6 +815,14 @@ export class ActiveRagdoll {
   static readonly moodNames = MOOD_NAMES;
 
   /**
+   * Lays one of the expression library's faces over the mood (null: the mood's own face).
+   * The body keeps the mood's posture; reactions still show on top. Crossfades quickly.
+   */
+  setExpression(e: ExpressionName | null): void { this.moods.expression = e; }
+  get expression(): ExpressionName | null { return this.moods.expression; }
+  static readonly expressionNames = EXPRESSION_NAMES;
+
+  /**
    * Holding something overhead: fins up, a little lean back. The caller attaches the
    * held thing (see `holdPoint` and `chestBody`); this only does the pose.
    */
@@ -1465,6 +1473,7 @@ export class ActiveRagdoll {
       groundY: this.groundY,
       facing: this.facing,
       mood: this.moods.mood,
+      expression: this.moods.expression,
       gesture: this.gestures.name,
       carried: this.carried,
       holding: this.holdWanted,

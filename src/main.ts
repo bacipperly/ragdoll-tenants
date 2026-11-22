@@ -220,6 +220,13 @@ window.addEventListener('keydown', (e) => {
       ragdoll.setMood(names[(names.indexOf(ragdoll.mood) + 1) % names.length]);
       break;
     }
+    case 'KeyX': {
+      // Cycle the expression library (after the last, back to the mood's own face).
+      const names = ActiveRagdoll.expressionNames, cur = ragdoll.expression;
+      const i = cur ? names.indexOf(cur) + 1 : 0;
+      ragdoll.setExpression(i < names.length ? names[i] : null);
+      break;
+    }
     case 'KeyC':
       useOrtho = !useOrtho;
       perspOrbit.enabled = !useOrtho;
@@ -329,11 +336,12 @@ function frame(now: number) {
     `Drag  orbit   Wheel zoom   Q/E  orbit   C  ${useOrtho ? 'close-up camera' : 'game (ortho) camera'}\n` +
     `Space jump                     B      ${ragdoll.showingSkeleton ? 'hide' : 'show'} skeleton\n` +
     `M     next mood                R      reset\n` +
+    `X     next expression\n` +
     `G     pick up / throw          V      put down\n` +
     `1–0   ${KEY_GESTURES.join(' ')}\n\n` +
     `state     ${s.knockedOut ? 'KNOCKED OUT' : s.muscle < 1 ? 'recovering' : 'active'}\n` +
     `muscle    ${(s.muscle * 100).toFixed(0)}%\n` +
-    `mood      ${s.mood}${s.reaction ? ` + ${s.reaction}` : ''}${s.gesture ? ` · ${s.gesture}` : ''}   annoyance ${'●'.repeat(Math.ceil(s.annoyance - 0.001))}${'○'.repeat(Math.max(0, 3 - Math.ceil(s.annoyance - 0.001)))}\n` +
+    `mood      ${s.mood}${s.expression ? ` · face: ${s.expression}` : ''}${s.reaction ? ` + ${s.reaction}` : ''}${s.gesture ? ` · ${s.gesture}` : ''}   annoyance ${'●'.repeat(Math.ceil(s.annoyance - 0.001))}${'○'.repeat(Math.max(0, 3 - Math.ceil(s.annoyance - 0.001)))}\n` +
     `grounded  ${s.grounded ? 'yes' : 'no'}\n` +
     `height    ${ragdoll.dims.height.toFixed(2)} units (game tenant: 0.9)\n` +
     `traits    ${ageName(TRAITS.age)} · weight ${TRAITS.weight.toFixed(1)} · fitness ${TRAITS.fitness.toFixed(1)}\n` +

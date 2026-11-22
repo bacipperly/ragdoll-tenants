@@ -5,3 +5,8 @@ source/
 *.tmp
 .DS_Store
 .claude/
+
+# Imported body models stay local (only the generated stand-in is shared)
+public/models/*.glb
+public/models/*.json
+!public/models/stand-in.glb

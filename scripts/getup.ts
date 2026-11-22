@@ -8,8 +8,8 @@ const base = recipeFromEditor('Base', '#3a86ff', 'calm');
 const crowd = Array.from({ length: 13 }, (_, i) => phys.createRagdoll({ recipe: randomRecipe(base, m), position: new THREE.Vector3((i % 5) * 1.6, 0, Math.floor(i / 5) * 1.6) }));
 const step = (s: number) => { for (let t = 0; t < s; t += 1 / 60) phys.step(1 / 60); };
 step(2); crowd.forEach((r) => r.setKnockedOut(true)); step(2); crowd.forEach((r) => r.setKnockedOut(false));
-const tilt = (r: any) => { const o = r.parts.get('torso').body.rotation(); return Math.acos(Math.min(1, 1 - 2 * (o.x * o.x + o.z * o.z))) * 57.3; };
+const tilt = (r: any) => { const o = r.parts.get('torso').body.rotation(); return Math.abs(Math.acos(Math.min(1, 1 - 2 * (o.x * o.x + o.z * o.z))) - r.restTilt) * 57.3; }; // from its resting tilt (a crawling baby's is ~75°)
 const up = new Map<string, number>();
-for (let t = 0; t < 10; t += 1 / 60) { phys.step(1 / 60); crowd.forEach((r: any, i) => { const k = `${i}:${r.recipe.name}`; if (!up.has(k) && Math.abs(r.parts.get('torso').body.translation().y - r.dims.hoverHeight) < 0.02 && tilt(r) < 8) up.set(k, t); }); }
+for (let t = 0; t < 10; t += 1 / 60) { phys.step(1 / 60); crowd.forEach((r: any, i) => { const k = `${i}:${r.recipe.name}`; if (!up.has(k) && Math.abs(r.parts.get('torso').body.translation().y - r.restHeight) < 0.02 && tilt(r) < 8) up.set(k, t); }); }
 const times = crowd.map((r, i) => up.get(`${i}:${r.recipe.name}`));
 console.log('seconds to stand:', times.map((t) => (t === undefined ? 'never' : t.toFixed(1))).join(' '), '| slowest', Math.max(...times.map((t) => t ?? 99)).toFixed(1));

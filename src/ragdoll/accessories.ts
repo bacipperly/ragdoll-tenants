@@ -219,7 +219,7 @@ class Cane {
     parent.getWorldQuaternion(this.q).invert();
     this.root.quaternion.copy(this.q);
     this.root.getWorldPosition(this.p);
-    const len = Math.max(0.02, this.p.y - groundY);
+    const len = Math.max(0.002, this.p.y - groundY); // a crawling baby's hand is nearly on the floor
     this.shaft.scale.set(1, len, 1);
     (this.shaft.children[0] as THREE.Mesh).scale.y = 1 / len; // keep the rubber tip its size
   }

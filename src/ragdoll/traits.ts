@@ -14,7 +14,7 @@
  * They're fixed when a ragdoll is built, like proportions (the sandbox rebuilds it when
  * they change).
  */
-import { TRAITS } from './config';
+import { CRAWL, TRAITS } from './config';
 import type { Word } from './mood';
 import { lifeStage } from './lifeStages';
 
@@ -34,6 +34,8 @@ export interface TraitEffects {
   neckSpeed: number; neckDamping: number;
   /** Walk: × step tempo, × stride size, × bounce, × waddle, × chosen walking speed. */
   cadence: number; stride: number; bob: number; waddle: number; speed: number;
+  /** 0 walks … 1 crawls on all fours (babies; see CRAWL). */
+  crawl: number;
   /** × jump power, × time to get back up after a knockout, × head squish. */
   jump: number; recover: number; squish: number;
   /** × the chance of teetering into a slip or tripping on a landing (see CLUMSY). */
@@ -83,6 +85,7 @@ export function traitEffects(t: { age: number; weight: number; fitness: number }
     bob: 1 + 0.5 * young - 0.4 * old + 0.5 * heavy,
     waddle: 1 + 0.6 * young + 0.9 * heavy - 0.2 * fit,
     speed: 1 - 0.15 * young - 0.35 * old - 0.2 * heavy + 0.15 * fit - 0.1 * unfit,
+    crawl: clamp01((CRAWL.toAge - t.age) / (CRAWL.toAge - CRAWL.fromAge)),
     // Never below 30%: stacked penalties (old + heavy + unfit) would otherwise leave it
     // too weak to leave the ground at all.
     jump: Math.max(0.3, 1 - 0.15 * young - 0.45 * old - 0.25 * heavy + 0.2 * fit - 0.15 * unfit),

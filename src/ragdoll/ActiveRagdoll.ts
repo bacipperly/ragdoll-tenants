@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { BODY, BUTT, CARRY, CLUMSY, EMOTION, GAIT, GETUP, GRAVITY_COMP, HOVER, JUMP, KNOCKOUT, LIMITS, MOVE, MUSCLES, UPRIGHT } from './config';
+import { BODY, BUTT, CARRY, CLUMSY, CRAWL, EMOTION, GAIT, GETUP, GRAVITY_COMP, HOVER, JUMP, KNOCKOUT, LIMITS, MOVE, MUSCLES, UPRIGHT } from './config';
 import { GooHead, type GooContact } from './goo';
 import { Face, acquireSkin, releaseSkin } from './skin';
 import { bodyDims, type BodyDims } from './proportions';
@@ -460,6 +460,8 @@ export class ActiveRagdoll implements AccentSubject {
   private skirt: Skirt | null = null;
   /** Glasses, bow, backpack, cane… (see accessories.ts). */
   private accessories: Accessories | null = null;
+  /** How far it's down on all fours, 0..1 (babies crawl; see CRAWL). */
+  private crawl = 0;
   /** Its hair (see hair.ts), and what it was built for (style, colours, under a hat or not). */
   private hair: Hair | null = null;
   private hairBuilt = '';
@@ -510,6 +512,7 @@ export class ActiveRagdoll implements AccentSubject {
     this.painter = new OutfitPainter(this.material, this.dims);
     this.painter.set(this.recipe.outfit);
     this.traits = traitEffects(this.recipe.traits);
+    this.crawl = this.traits.crawl; // a baby starts out on all fours
     this.moods.base = this.traits.posture;
     const defs = buildParts(this.dims);
 
@@ -883,6 +886,20 @@ export class ActiveRagdoll implements AccentSubject {
     return Math.hypot(v.x, v.z);
   }
   get headRadius(): number { return this.dims.headR; }
+
+  /**
+   * The belly's resting height above the ground: standing, or (crawling) kneeling with
+   * the belly tipped forward, the knees under the hips and the shins along the floor.
+   */
+  get restHeight(): number {
+    const D = this.dims;
+    const crawl = D.thighLen + D.shinR + (D.bellyY - D.hipY) * Math.cos(CRAWL.pitch);
+    return D.hoverHeight + (crawl - D.hoverHeight) * this.crawl;
+  }
+  /** How far the belly tips forward at rest (rad): 0 standing, more on all fours. */
+  get restTilt(): number { return CRAWL.pitch * this.crawl; }
+  /** 0 walking … 1 crawling. */
+  get crawling(): number { return this.crawl; }
   headCenter(out: THREE.Vector3): THREE.Vector3 { return this.part('head').bone.getWorldPosition(out); }
   bodyCenter(out: THREE.Vector3): THREE.Vector3 { return this.drawnMiddle(out); }
   velocity(out: THREE.Vector3): THREE.Vector3 {
@@ -970,7 +987,7 @@ export class ActiveRagdoll implements AccentSubject {
     if (this.knockedOut || this.carried || !this.grounded || this.jumpPhase === 'crouch') return false;
     if (this.jumpPhase === 'air') {
       const height = this.torso.body.translation().y - this.groundY;
-      if (this.vel.y > 0 || height > this.dims.hoverHeight + 0.02) return false;
+      if (this.vel.y > 0 || height > this.restHeight + 0.02) return false;
     }
     // Every part leaves at the same upward speed, so the whole body goes up together
     // instead of the belly yanking the limbs after it.
@@ -1095,11 +1112,15 @@ export class ActiveRagdoll implements AccentSubject {
 
     this.updateMood(dt);
     const P = this.moods.letters;
+    // Babies crawl, unless they're being carried or holding something up.
+    const crawlWant = this.carried || this.holdWanted ? 0 : this.traits.crawl;
+    this.crawl += (crawlWant - this.crawl) * Math.min(1, dt * 2.5);
 
     const speed = Math.hypot(this.vel.x, this.vel.z);
     // Energy changes how fast it chooses to walk: a tired shuffle, an excited scurry.
     const maxSpeed = (this.strolling ? MOVE.strollSpeed : MOVE.walkSpeed) * (1 + 0.25 * P.energy) * this.traits.speed
-      * Math.max(0.3, 1 - CARRY.slowdown * this.loadMass / this.totalMass);
+      * Math.max(0.3, 1 - CARRY.slowdown * this.loadMass / this.totalMass)
+      * (1 - (1 - CRAWL.speed) * this.crawl);
     const wantX = this.knockedOut || this.carried || this.getUp !== 'none' ? 0 : this.moveInput.x * maxSpeed;
     const wantZ = this.knockedOut || this.carried || this.getUp !== 'none' ? 0 : this.moveInput.y * maxSpeed;
 
@@ -1259,7 +1280,7 @@ export class ActiveRagdoll implements AccentSubject {
     if (!standing && !this.knockedOut) this.peakY = Math.max(this.peakY, y);
     if (standing && !this.wasStanding) {
       // How far it fell: from its highest to standing on what it landed on.
-      this.landImpact = this.peakY - (this.groundY + this.dims.hoverHeight);
+      this.landImpact = this.peakY - (this.groundY + this.restHeight);
       this.landPending = this.landImpact > C.dropSafe ? 0.08 : -1;
       this.peakY = -Infinity;
     }
@@ -1705,7 +1726,7 @@ export class ActiveRagdoll implements AccentSubject {
     if (this.jumpPhase === 'air') {
       // In the air the hover is off, or it would hold the body down. Land once it's on
       // its way down and back at standing height.
-      if (this.airTime > 0.12 && this.vel.y <= 0 && hit.timeOfImpact < this.dims.hoverHeight + 0.02) {
+      if (this.airTime > 0.12 && this.vel.y <= 0 && hit.timeOfImpact < this.restHeight + 0.02) {
         this.jumpPhase = 'ground';
         this.squash = Math.min(1, -this.vel.y / 3); // harder landing, deeper squash
         this.heightIntegral = 0;
@@ -1716,7 +1737,7 @@ export class ActiveRagdoll implements AccentSubject {
     // Dip into the take-off crouch, and squash on landing.
     const crouch = this.jumpPhase === 'crouch' ? 1 - this.crouchTimer / JUMP.crouchSeconds : 0;
     const dip = JUMP.crouchDepth * crouch + JUMP.landSquash * this.squash + this.gestures.extras.dip;
-    const error = this.dims.hoverHeight + breathe + bounce + bob - dip - hit.timeOfImpact;
+    const error = this.restHeight + breathe + bounce + bob - dip - hit.timeOfImpact;
 
     // Only integrate near the target. While lying down or getting up the error is
     // large for seconds, and integrating it then winds up and overshoots the stand.
@@ -1766,8 +1787,8 @@ export class ActiveRagdoll implements AccentSubject {
     // Standing: a slow weight shift side to side. Walking: a waddle, rocking onto each
     // stance leg, and a twist against the stride.
     const gs = Math.sin(this.gaitPhase);
-    const sway = (0.035 + 0.08 * P.sway) * Math.sin(this.time * 0.8) * (1 - this.gaitWeight)
-      + GAIT.stepRoll * this.traits.waddle * gs * this.gaitWeight;
+    const sway = ((0.035 + 0.08 * P.sway) * Math.sin(this.time * 0.8) * (1 - this.gaitWeight)
+      + GAIT.stepRoll * this.traits.waddle * gs * this.gaitWeight) * (1 - 0.6 * this.crawl);
     const twist = GAIT.stepTwist * gs * this.gaitWeight;
     const X = this.gestures.extras;
 
@@ -1789,7 +1810,8 @@ export class ActiveRagdoll implements AccentSubject {
       this.qTarget.premultiply(this.qTip);
     }
     // Positive rotation about local +x tips the top toward local +z (forward).
-    this.qLean.setFromAxisAngle(this.axisX, lean + X.bow);
+    // On all fours the belly tips well forward (and leans less with speed).
+    this.qLean.setFromAxisAngle(this.axisX, lean * (1 - 0.6 * this.crawl) + X.bow + CRAWL.pitch * this.crawl);
     this.qTarget.multiply(this.qLean);
     this.qLean.setFromAxisAngle(this.axisZ, sway + X.bellyRoll);
     this.qTarget.multiply(this.qLean);
@@ -1960,7 +1982,49 @@ export class ActiveRagdoll implements AccentSubject {
           break;
         }
       }
+      if (this.crawl > 0.01) this.crawlPose(j, name, side, s, c, w);
       if (getUp > 0) this.getUpPose(j, name, side, getUp);
+    }
+  }
+
+  /**
+   * On all fours, blended over the usual pose by how far it's crawling: the chest arched
+   * up, knees under the hips with the shins along the floor, fins reaching down to the
+   * floor in front. Crawling, diagonal pairs move together: each fin swings forward with
+   * the opposite knee (the walk's arm swing already pairs them that way).
+   */
+  private crawlPose(j: Joint, name: string, side: number, s: number, c: number, w: number): void {
+    const k = this.crawl, lerp = THREE.MathUtils.lerp, C = CRAWL, left = side > 0;
+    const fwd = left ? s : -s, dfwd = (left ? c : -c) * this.gaitRate;
+    switch (name) {
+      case 'chest':
+        j.target.x = lerp(j.target.x, 0.3 * j.target.x - C.chestArch, k);
+        j.target.z *= 1 - 0.6 * k;
+        j.targetVel.z *= 1 - 0.6 * k;
+        break;
+      case 'thighL':
+      case 'thighR':
+        j.target.x = lerp(j.target.x, -C.pitch - fwd * C.hipSwing * w, k);
+        j.target.z = lerp(j.target.z, side * 0.12, k);
+        j.targetVel.x = lerp(j.targetVel.x, -dfwd * C.hipSwing * w, k);
+        break;
+      case 'shinL':
+      case 'shinR':
+        j.target.x = lerp(j.target.x, C.kneeBend + C.kneeLift * w * Math.max(0, left ? c : -c), k);
+        j.targetVel.x *= 1 - k;
+        break;
+      case 'upperArmL':
+      case 'upperArmR':
+        // Straight down in the world (the chest is tipped by pitch − arch), then the swing.
+        j.target.x = lerp(j.target.x, -(C.pitch - C.chestArch) - 0.1 + fwd * C.finSwing * w, k);
+        j.target.z = lerp(j.target.z, side * C.finOut, k);
+        j.targetVel.x = lerp(j.targetVel.x, dfwd * C.finSwing * w, k);
+        break;
+      case 'forearmL':
+      case 'forearmR':
+        // A fin coming forward curls up off the floor; planted, it's nearly straight.
+        j.target.x = lerp(j.target.x, -0.1 - 0.45 * w * Math.max(0, -(left ? c : -c)), k);
+        break;
     }
   }
 

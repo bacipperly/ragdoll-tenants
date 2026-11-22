@@ -36,8 +36,8 @@ step(6, () => {
         finLow[i] = Math.min(finLow[i], p.y);
       }
     }
-    const tilt = Math.acos(Math.min(1, up(r).y)) * 57.3;
-    if (stood[i] < 0 && r.getUp === 'none' && tilt < 10 && Math.abs(r.parts.get('torso').body.translation().y - r.dims.hoverHeight) < 0.03) stood[i] = t;
+    const tilt = Math.abs(Math.acos(Math.min(1, up(r).y)) - r.restTilt) * 57.3; // from its resting tilt (crawling babies)
+    if (stood[i] < 0 && r.getUp === 'none' && tilt < 10 && Math.abs(r.parts.get('torso').body.translation().y - r.restHeight) < 0.03) stood[i] = t;
   });
 });
 let ok = true;

@@ -236,6 +236,24 @@ export const KNOCKOUT = {
 } as const;
 
 /**
+ * Crawling (babies): on all fours, the belly pitched forward, the chest arched up so the
+ * head can look ahead, knees on the floor under the hips and fins reaching down in front.
+ * The crawl moves diagonal pairs together (left fin with right knee), like a real baby.
+ */
+export const CRAWL = {
+  fromAge: 0.045, // crawls fully at or below this age…
+  toAge: 0.085, // …and walks from this age (a toddler)
+  pitch: 1.3, // how far the belly tips forward (rad)
+  chestArch: 0.6, // the chest arches back up from that, toward the head
+  kneeBend: 1.45, // shins folded back along the floor
+  hipSwing: 0.3, // thigh swing per step (rad)
+  kneeLift: 0.3, // extra knee bend as a leg comes forward
+  finSwing: 0.35, // fin reach per step (rad)
+  finOut: 0.25, // fins splayed a little
+  speed: 0.55, // × walking speed
+};
+
+/**
  * Getting up after a knockout or a tumble, with the fins: on its side it rolls onto its
  * front first; face down it does a push-up (fins planted under the chest, knees tucked);
  * face up it sits up, pushing off behind with its fins. Then it stands.

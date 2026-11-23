@@ -44,6 +44,8 @@ export interface BodyModelSettings {
    * onto ours by name). Default 'ours'.
    */
   weights?: 'ours' | 'rig';
+  /** Where the knee sits, as a share of the leg's length from the foot (default 0.6, a little above halfway). */
+  kneeHeight?: number;
 }
 
 /** What each separate part of a segmented model is. */
@@ -83,6 +85,8 @@ export interface BodyModel {
   measures: ModelMeasures | null;
   /** Vertices from here on are the caps' (see capParts). */
   capFrom: number;
+  /** Where the knee sits, as a share of the leg from the foot. */
+  kneeHeight: number;
 }
 
 /** One physics capsule in the rest pose (vertical), and its bone. */
@@ -461,6 +465,7 @@ export function prepareBodyModel(name: string, positions: Float32Array, normals:
   return {
     name, positions: finalPos, normals: finalNrm, index: finalIndex, landmarks, found, armAngle, legAngle, head: settings.head ?? 'goo',
     capFrom: pos.length / 3,
+    kneeHeight: Math.min(0.85, Math.max(0.2, settings.kneeHeight ?? 0.6)),
     weights: settings.weights === 'rig' && rig ? 'rig' : 'ours', part: finalPart, roles, hip, rig: rig && finalPos.length > pos.length ? extendRig(rig, (finalPos.length - pos.length) / 3, finalPart!, part!) : rig, measures,
   };
 }
@@ -674,15 +679,17 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
       // The hand-over straddles the seam (the hip gives a little too, as a real one does),
       // and the torso round the seam follows the same rule (see the torso, below), so
       // both sides agree on the seam itself and it stays shut.
-      body = 1 - THREE.MathUtils.smoothstep(t, depth - 0.5 * upperLen, depth + 0.5 * upperLen);
+      // (Blends are sized from the whole limb, so moving the knee doesn't sharpen them.)
+      const band = fin ? upperLen : (D.thighLen + D.shinLen) / 2;
+      body = 1 - THREE.MathUtils.smoothstep(t, depth - 0.5 * band, depth + 0.5 * band);
       // Between the legs, at the crotch, the body holds still: pulled two ways by
       // scissoring thighs it would tear. The swing shows on the outside of the hip.
       if (!fin) {
         const inner = 1 - THREE.MathUtils.smoothstep(x * lb.side, 0.1 * Math.abs(lb.px), 0.75 * Math.abs(lb.px));
-        body += (1 - body) * inner * (1 - THREE.MathUtils.smoothstep(t, depth, depth + upperLen));
+        body += (1 - body) * inner * (1 - THREE.MathUtils.smoothstep(t, depth, depth + band));
       }
-      const knee = Math.max(upperLen, depth + 0.6 * upperLen);
-      lower = THREE.MathUtils.smoothstep(t, knee - 0.35 * upperLen, knee + 0.35 * upperLen);
+      const knee = Math.max(upperLen, depth + 0.5 * band);
+      lower = THREE.MathUtils.smoothstep(t, knee - 0.35 * band, knee + 0.35 * band);
     } else {
       lower = THREE.MathUtils.smoothstep(t, upperLen - 0.6 * span, upperLen + 0.6 * span);
       body = 1 - THREE.MathUtils.smoothstep(t, -0.4 * span, 0.7 * span);
@@ -771,7 +778,7 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
         if (!(depth > -Infinity && depth < 0.6 * upperLen)) continue;
         let best = Infinity;
         for (let k = 0; k < pts.length; k += 3) best = Math.min(best, Math.hypot(x - pts[k], y - pts[k + 1], z - pts[k + 2]));
-        const near = 1 - THREE.MathUtils.smoothstep(best, 0, 0.8 * upperLen);
+        const near = 1 - THREE.MathUtils.smoothstep(best, 0, 0.8 * (limb.startsWith('fin') ? upperLen : (D.thighLen + D.shinLen) / 2));
         if (near <= 0) continue;
         chainInto(limb, x, y, tmpW);
         for (let s2 = 0; s2 < S; s2++) w[s2] += (tmpW[s2] - w[s2]) * near;

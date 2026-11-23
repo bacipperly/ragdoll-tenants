@@ -105,11 +105,16 @@ if (MODEL && MODEL !== 'procedural') {
   try {
     // &weights=rig uses the model's own rig weights instead of ours (to compare).
     const weights = new URLSearchParams(location.search).get('weights');
-    const m = await loadBodyModel(`./models/${MODEL}.glb`, weights === 'rig' || weights === 'ours' ? { weights } : {});
+    // &knee=0.65 tries another knee height (a share of the leg, from the foot).
+    const knee = Number(new URLSearchParams(location.search).get('knee'));
+    const m = await loadBodyModel(`./models/${MODEL}.glb`, {
+      ...(weights === 'rig' || weights === 'ours' ? { weights } : {}),
+      ...(knee > 0 && knee < 1 ? { kneeHeight: knee } : {}),
+    });
     setBodyModel(m);
     // Its proportions become ours (head size and all), so it fits without stretching.
     const cal = calibrate(m);
-    if (cal) setProportionCalibration(cal);
+    setProportionCalibration(cal ?? {}, m.kneeHeight);
     const guessed = Object.entries(m.found).filter(([, how]) => how === 'guessed').map(([k]) => k);
     modelNote = `body      ${MODEL}.glb (${m.index.length / 3} triangles${m.part ? `, ${m.roles.length} parts` : ''}, ${m.weights === 'rig' ? 'its own rig weights' : 'our weights'}`
       + `${cal ? ', proportions from the model' : ''}${guessed.length ? `, guessed: ${guessed.join(', ')}` : ''})\n`;

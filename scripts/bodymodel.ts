@@ -16,7 +16,7 @@ for (const weights of modes) {
 const model = prepareBodyModel(`test-${weights}`, g.positions, g.normals, g.index, { weights }, { part: g.part, rig: g.rig });
 setBodyModel(model);
 const cal = calibrate(model);
-setProportionCalibration(cal ?? {});
+setProportionCalibration(cal ?? {}, model.kneeHeight);
 console.log(`\n${file} · ${weights === 'rig' ? "the model's own rig weights" : 'our weights'}${cal ? ' · calibrated' : ''}`);
 phys.world.createCollider(RAPIER.ColliderDesc.cuboid(50, 0.5, 50).setTranslation(0, -0.5, 0));
 const tiltOf = (r: any) => { const q = r.parts.get('torso').body.rotation(); return Math.abs(Math.acos(Math.min(1, 1 - 2 * (q.x * q.x + q.z * q.z))) - r.restTilt) * 57.3; };

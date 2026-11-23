@@ -8,7 +8,7 @@ const file = process.argv[2];
 if (file) {
   const g = readGlb(file);
   const m = prepareBodyModel('m', g.positions, g.normals, g.index, {}, { part: g.part, rig: g.rig });
-  setBodyModel(m); setProportionCalibration(calibrate(m) ?? {});
+  setBodyModel(m); setProportionCalibration(calibrate(m) ?? {}, m.kneeHeight);
 }
 const phys = await RagdollPhysics.create();
 phys.world.createCollider(RAPIER.ColliderDesc.cuboid(50, 0.5, 50).setTranslation(0, -0.5, 0));

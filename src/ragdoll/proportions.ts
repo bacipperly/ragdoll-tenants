@@ -18,9 +18,13 @@ type Traits = { age: number; weight: number; fitness: number };
  * bodyModel.ts), applied on top of everything else. Empty: no change.
  */
 const CALIBRATION: Partial<Record<keyof Proportions, number>> = {};
-export function setProportionCalibration(f: Partial<Record<keyof Proportions, number>>): void {
+/** Where the knee sits, as a share of the leg from the foot (null: as drawn, halfway). */
+let KNEE: number | null = null;
+/** @param knee where the knee sits, as a share of the leg from the foot (null: as drawn). */
+export function setProportionCalibration(f: Partial<Record<keyof Proportions, number>>, knee: number | null = null): void {
   for (const k of Object.keys(CALIBRATION)) delete CALIBRATION[k as keyof Proportions];
   Object.assign(CALIBRATION, f);
+  KNEE = knee;
 }
 export function proportionCalibration(): Readonly<Partial<Record<keyof Proportions, number>>> { return CALIBRATION; }
 
@@ -147,8 +151,10 @@ export function bodyDims(base: Proportions = PROPORTIONS, traits: Traits = TRAIT
   const dims: Omit<BodyDims, 'key'> = {
     // Wider hips set the legs further apart; wider shoulders the fins.
     hipY, hipX: (B.hipX + (P.hipWidth - 1) * 0.03) * bw,
-    thighLen: B.thighLen * ll, thighR: B.thighR * lt,
-    shinLen: B.shinLen * ll, shinR: B.shinR * lt,
+    // The knee: as drawn, or moved up or down the leg (a shorter thigh and a longer
+    // shin, or the other way round; the hip and the feet stay put).
+    thighLen: KNEE === null ? B.thighLen * ll : (B.thighLen + B.shinLen) * ll * (1 - KNEE), thighR: B.thighR * lt,
+    shinLen: KNEE === null ? B.shinLen * ll : (B.thighLen + B.shinLen) * ll * KNEE, shinR: B.shinR * lt,
     bellyY, bellyR, bellyLen,
     spineY, chestR: B.chestR * bw * (1 + 0.5 * (P.shoulderWidth - 1)), chestLen: B.chestLen * bh,
     neckY, headY, headR, headColliderR: B.headColliderR * hs, headScale: hs,
@@ -175,6 +181,6 @@ export function bodyDims(base: Proportions = PROPORTIONS, traits: Traits = TRAIT
     },
   };
   // Identifies the shape: the tuned proportions plus the traits.
-  const key = [...Object.values(base), traits.age, traits.weight, traits.fitness, ...Object.values(CALIBRATION)].map(r4).join(',');
+  const key = [...Object.values(base), traits.age, traits.weight, traits.fitness, ...Object.values(CALIBRATION), KNEE ?? -1].map(r4).join(',');
   return { ...dims, key };
 }

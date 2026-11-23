@@ -110,7 +110,9 @@ if (MODEL && MODEL !== 'procedural') {
     const weights = new URLSearchParams(location.search).get('weights');
     // &knee=0.65 tries another knee height (a share of the leg, from the foot).
     const knee = Number(new URLSearchParams(location.search).get('knee'));
-    const m = await loadBodyModel(`./models/${MODEL}.glb`, {
+    // models/<name>.glb, or models/<name>.fbx (what Mixamo hands back).
+    const glb = await fetch(`./models/${MODEL}.glb`, { method: 'HEAD' }).then((r) => r.ok && !(r.headers.get('content-type') ?? '').includes('html')).catch(() => false);
+    const m = await loadBodyModel(`./models/${MODEL}.${glb ? 'glb' : 'fbx'}`, {
       ...(weights === 'rig' || weights === 'ours' ? { weights } : {}),
       ...(knee > 0 && knee < 1 ? { kneeHeight: knee } : {}),
     });
@@ -120,11 +122,11 @@ if (MODEL && MODEL !== 'procedural') {
     setProportionCalibration(cal ?? {}, m.kneeHeight);
     bodyCal = cal; bodyKnee = m.kneeHeight;
     const guessed = Object.entries(m.found).filter(([, how]) => how === 'guessed').map(([k]) => k);
-    modelNote = `body      ${MODEL}.glb (${m.index.length / 3} triangles${m.part ? `, ${m.roles.length} parts` : ''}, ${m.weights === 'rig' ? 'its own rig weights' : 'our weights'}`
+    modelNote = `body      ${MODEL} (${m.index.length / 3} triangles${m.part ? `, ${m.roles.length} parts` : ''}, ${m.weights === 'rig' ? 'its own rig weights' : 'our weights'}`
       + `${cal ? ', proportions from the model' : ''}${guessed.length ? `, guessed: ${guessed.join(', ')}` : ''})\n`;
     console.info('[body model]', m.name, { landmarks: m.landmarks, found: m.found, roles: m.roles, armAngleDeg: (m.armAngle * 57.3).toFixed(1), legAngleDeg: (m.legAngle * 57.3).toFixed(1), calibration: cal });
   } catch (err) {
-    modelNote = `body      couldn't load models/${MODEL}.glb, using the generated body\n`;
+    modelNote = `body      couldn't load models/${MODEL}.glb or .fbx, using the generated body\n`;
     console.warn('[body model]', err);
   }
 }

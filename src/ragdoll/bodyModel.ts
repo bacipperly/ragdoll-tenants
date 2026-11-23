@@ -54,7 +54,11 @@ export interface BodyModelSettings {
 export type PartRole = 'head' | 'face' | 'torso' | 'finL' | 'finR' | 'legL' | 'legR';
 
 /** A model's own rig, per vertex: up to 4 joints (indices into names) and weights. */
-export interface ModelRig { joints: Uint16Array; weights: Float32Array; names: string[] }
+export interface ModelRig {
+  joints: Uint16Array; weights: Float32Array; names: string[];
+  /** Where each bone sits in the rest pose (model space), when known. */
+  bones?: { name: string; x: number; y: number; z: number }[];
+}
 
 /** The model's measurements (its own units), for fitting our proportions to it. */
 export interface ModelMeasures {
@@ -407,8 +411,22 @@ export function prepareBodyModel(name: string, positions: Float32Array, normals:
   let armAngle = finAngle(S, L, tol);
   let legAngle = limbAngle(S, L.feet + 0.1 * (L.crotch - L.feet), L.crotch - 0.1 * (L.crotch - L.feet), tol);
   let hip: number | null = null, measures: ModelMeasures | null = null;
-  const part = extra.part ?? null;
-  const roles = part ? classifyParts(pos, part) : [];
+  const rig0 = extra.rig ?? null;
+  // Parts: the model's own (segmented), or, for a rigged single mesh (what an
+  // auto-rigger hands back), each vertex's part from the bone that moves it most.
+  let part = extra.part ?? null, roles: PartRole[] = part ? classifyParts(pos, part) : [];
+  const fromWeights = !part && !!rig0;
+  if (fromWeights) {
+    const ROLE: Record<string, PartRole> = { head: 'head', thighL: 'legL', shinL: 'legL', thighR: 'legR', shinR: 'legR', upperArmL: 'finL', forearmL: 'finL', upperArmR: 'finR', forearmR: 'finR' };
+    roles = ['head', 'torso', 'finL', 'finR', 'legL', 'legR'];
+    const ours = rig0!.names.map((n) => roles.indexOf(ROLE[ourBoneForRigBone(n)] ?? 'torso'));
+    part = new Int32Array(pos.length / 3);
+    for (let v = 0; v < part.length; v++) {
+      let best = 0;
+      for (let k = 1; k < 4; k++) if (rig0!.weights[v * 4 + k] > rig0!.weights[v * 4 + best]) best = k;
+      part[v] = ours[rig0!.joints[v * 4 + best]];
+    }
+  }
 
   // Segmented: the parts say exactly where everything is.
   if (part && roles.includes('head') && roles.includes('torso')) {
@@ -457,9 +475,38 @@ export function prepareBodyModel(name: string, positions: Float32Array, normals:
       finLength: finLen, finHalfWidth: finHalf, finRootX, legHalfWidth: legHalf, legX,
     };
   }
-  // Close the parts' cut edges (after measuring, which the caps don't change).
+  // A rigged single mesh (an auto-rigger's work, with no parts to measure from): its
+  // skeleton says where the hips, knees and neck are, and which way the limbs hang.
+  // (Not used to measure the body's proportions: riggers put joints where suits them,
+  // like a shoulder out at a fin's edge, not where our skeleton has them. Segmented
+  // models are measured from their parts, which has proved more reliable.)
+  let kneeFromRig: number | null = null;
+  if (fromWeights && rig0?.bones?.length) {
+    const B = rig0.bones.map((b) => ({ ...parseRigBone(b.name), x: c * b.x + s * b.z - cx, y: b.y, z: -s * b.x + c * b.z - cz }));
+    const find = (kind: BoneKind, side: 'L' | 'R' | '') => B.find((b) => b.kind === kind && b.side === side) ?? null;
+    const thigh = [find('thigh', 'L'), find('thigh', 'R')], knee = [find('shin', 'L'), find('shin', 'R')];
+    const foot = [find('foot', 'L'), find('foot', 'R')], arm = [find('upperArm', 'L'), find('upperArm', 'R')];
+    const hand = [find('hand', 'L') ?? find('forearm', 'L'), find('hand', 'R') ?? find('forearm', 'R')];
+    const head = find('neck', '') ?? find('head', ''); // the neck joint: the head joint sits up inside the head
+    if (thigh[0] && thigh[1] && arm[0] && arm[1] && head) {
+      const set = (k: keyof Landmarks, v: number) => { if (settings.landmarks?.[k] === undefined) { L[k] = v; found[k] = 'detected'; } };
+      hip = (thigh[0].y + thigh[1].y) / 2;
+      set('neck', head.y);
+      set('shoulder', (arm[0].y + arm[1].y) / 2);
+      // Out from hanging straight down, from a joint to the one below it.
+      const out = (a: ReturnType<typeof find>, b: ReturnType<typeof find>) => (a && b ? Math.max(0, Math.atan2(Math.abs(b.x) - Math.abs(a.x), a.y - b.y)) : null);
+      const avg = (xs: (number | null)[]) => { const v = xs.filter((x): x is number => x !== null); return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null; };
+      armAngle = avg([out(arm[0], hand[0]), out(arm[1], hand[1])]) ?? armAngle;
+      legAngle = avg([out(thigh[0], foot[0] ?? knee[0]), out(thigh[1], foot[1] ?? knee[1])]) ?? legAngle;
+      if (knee[0] && knee[1] && hip > L.feet) kneeFromRig = Math.min(0.85, Math.max(0.2, ((knee[0].y + knee[1].y) / 2 - L.feet) / (hip - L.feet)));
+      if (measures) measures.hip = hip - L.feet;
+    }
+  }
+
+  // Close the parts' cut edges (after measuring, which the caps don't change). Not for
+  // parts read from the rig's weights: that's one continuous mesh, with nothing cut.
   let finalPos = pos, finalNrm = nrm, finalIndex = index, finalPart = part;
-  if (part && roles.length) {
+  if (part && roles.length && !fromWeights) {
     const c = capParts(pos, nrm, index, part, roles);
     finalPos = c.pos; finalNrm = c.nrm; finalIndex = c.index; finalPart = c.part;
   }
@@ -469,9 +516,10 @@ export function prepareBodyModel(name: string, positions: Float32Array, normals:
   return {
     name, positions: finalPos, normals: finalNrm, index: finalIndex, landmarks, found, armAngle, legAngle, head: settings.head ?? 'goo',
     capFrom: pos.length / 3,
-    kneeHeight: Math.min(0.85, Math.max(0.2, settings.kneeHeight ?? 0.6)),
+    kneeHeight: Math.min(0.85, Math.max(0.2, settings.kneeHeight ?? kneeFromRig ?? 0.6)),
     kneeBend: Math.min(1, Math.max(0.2, settings.kneeBend ?? 0.6)),
-    weights: settings.weights === 'rig' && rig ? 'rig' : 'ours', part: finalPart, roles, hip, rig: rig && finalPos.length > pos.length ? extendRig(rig, (finalPos.length - pos.length) / 3, finalPart!, part!) : rig, measures,
+    // A rigged single mesh (an auto-rigger's work) uses its own weights unless told otherwise.
+    weights: (settings.weights ?? (fromWeights ? 'rig' : 'ours')) === 'rig' && rig ? 'rig' : 'ours', part: finalPart, roles, hip, rig: rig && finalPos.length > pos.length ? extendRig(rig, (finalPos.length - pos.length) / 3, finalPart!, part!) : rig, measures,
   };
 }
 
@@ -492,19 +540,51 @@ function extendRig(rig: ModelRig, added: number, partAll: Int32Array, partOrig: 
   return { ...rig, joints, weights };
 }
 
-/** A rig bone's name → which of our bones it moves (Mixamo-style names, which Tripo uses). */
-export function ourBoneForRigBone(name: string): string {
-  const n = name.replace(/^.*:/, '').toLowerCase();
-  const side = n.startsWith('left') ? 'L' : n.startsWith('right') ? 'R' : '';
-  if (side) {
-    if (/upleg|thigh/.test(n)) return `thigh${side}`;
-    if (/leg|foot|toe|calf|shin/.test(n)) return `shin${side}`;
-    if (/forearm|hand|thumb|index|middle|ring|pinky/.test(n)) return `forearm${side}`;
-    if (/arm|shoulder/.test(n)) return `upperArm${side}`;
+type BoneKind = 'hips' | 'chest' | 'neck' | 'head' | 'clavicle' | 'upperArm' | 'forearm' | 'hand' | 'thigh' | 'shin' | 'foot' | 'other';
+
+/**
+ * Reads a rig bone's name, whichever auto-rigger made it: Mixamo ('mixamorig:LeftUpLeg'),
+ * AccuRIG / Character Creator ('CC_Base_L_Thigh'), Blender-style ('thigh.L', 'upper_arm_l')…
+ * into a side (L is the character's left, +x) and a kind of bone.
+ */
+export function parseRigBone(name: string): { side: 'L' | 'R' | ''; kind: BoneKind } {
+  const tokens = name.replace(/^.*:/, '').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/[\s_.\-]+/).filter(Boolean);
+  let side: 'L' | 'R' | '' = '';
+  const rest: string[] = [];
+  for (const t of tokens) {
+    if (t === 'l' || t === 'left') side = 'L';
+    else if (t === 'r' || t === 'right') side = 'R';
+    else if (!['cc', 'base', 'mixamorig', 'def', 'org', 'bip', 'bip01', 'jnt', 'joint', 'bone'].includes(t)) rest.push(t);
   }
-  if (/neck|head/.test(n)) return 'head';
-  if (/spine2|spine1|chest/.test(n)) return 'chest';
-  return 'torso'; // hips, spine, anything else
+  const k = rest.join('');
+  const kind: BoneKind =
+    /upleg|thigh|upperleg/.test(k) ? 'thigh'
+    : /calf|shin|lowerleg|knee|^leg\d*$/.test(k) ? 'shin'
+    : /foot|ankle|toe|ball/.test(k) ? 'foot'
+    : /clavicle|shoulder/.test(k) ? 'clavicle'
+    : /forearm|lowerarm|elbow/.test(k) ? 'forearm'
+    : /upperarm|^arm\d*$/.test(k) ? 'upperArm'
+    : /hand|wrist|thumb|index|middle|ring|pinky|finger/.test(k) ? 'hand'
+    : /neck/.test(k) ? 'neck'
+    : /head/.test(k) ? 'head'
+    : /spine0?[123]|chest/.test(k) ? 'chest'
+    : /spine|hips?|pelvis|waist|root/.test(k) ? 'hips'
+    : 'other';
+  return { side, kind };
+}
+
+/** A rig bone's name → which of our bones it moves. */
+export function ourBoneForRigBone(name: string): string {
+  const { side, kind } = parseRigBone(name);
+  if (side) {
+    if (kind === 'thigh') return `thigh${side}`;
+    if (kind === 'shin' || kind === 'foot') return `shin${side}`;
+    if (kind === 'clavicle' || kind === 'upperArm') return `upperArm${side}`;
+    if (kind === 'forearm' || kind === 'hand') return `forearm${side}`;
+  }
+  if (kind === 'neck' || kind === 'head') return 'head';
+  if (kind === 'chest') return 'chest';
+  return 'torso';
 }
 
 // ---------------------------------------------------------------- our proportions, from the model
@@ -897,16 +977,25 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
  * the settings file next to it (same name, .json).
  */
 export async function loadBodyModel(url: string, overrides: BodyModelSettings = {}): Promise<BodyModel> {
-  const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
-  const gltf = await new GLTFLoader().loadAsync(url);
+  // .glb, or .fbx (what Mixamo and other auto-riggers hand back).
+  let root: THREE.Object3D;
+  if (/\.fbx$/i.test(url)) {
+    const { FBXLoader } = await import('three/addons/loaders/FBXLoader.js');
+    root = await new FBXLoader().loadAsync(url);
+  } else {
+    const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+    root = (await new GLTFLoader().loadAsync(url)).scene;
+  }
+  const gltf = { scene: root };
   let settings: BodyModelSettings = {};
   try {
-    const r = await fetch(url.replace(/\.glb$/i, '.json'));
+    const r = await fetch(url.replace(/\.(glb|fbx)$/i, '.json'));
     if (r.ok) settings = (await r.json()) as BodyModelSettings;
   } catch { /* no settings: all automatic */ }
   settings = { ...settings, ...overrides };
   const pos: number[] = [], nrm: number[] = [], idx: number[] = [], part: number[] = [];
   const joints: number[] = [], weights: number[] = [], names: string[] = [];
+  const bones = new Map<string, THREE.Vector3>();
   let parts = 0, rigged = true;
   gltf.scene.updateMatrixWorld(true);
   gltf.scene.traverse((o) => {
@@ -923,6 +1012,7 @@ export async function loadBodyModel(url: string, overrides: BodyModelSettings = 
     // Its rig, if it has one: joints as indices into one shared list of bone names.
     const sk = (mesh as THREE.SkinnedMesh).skeleton, si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
     if (sk && si && sw) {
+      for (const bone of sk.bones) if (!bones.has(bone.name)) bones.set(bone.name, bone.getWorldPosition(new THREE.Vector3()));
       for (let i = 0; i < p.count; i++) {
         for (let k = 0; k < 4; k++) {
           const bn = sk.bones[si.getComponent(i, k)]?.name ?? '';
@@ -935,9 +1025,12 @@ export async function loadBodyModel(url: string, overrides: BodyModelSettings = 
     parts++;
   });
   if (!pos.length) throw new Error(`${url}: no meshes in it`);
-  const name = url.split('/').pop()!.replace(/\.glb$/i, '');
+  const name = url.split('/').pop()!.replace(/\.(glb|fbx)$/i, '');
   return prepareBodyModel(name, Float32Array.from(pos), Float32Array.from(nrm), Uint32Array.from(idx), settings, {
     part: parts > 1 ? Int32Array.from(part) : undefined,
-    rig: rigged && names.length ? { joints: Uint16Array.from(joints), weights: Float32Array.from(weights), names } : undefined,
+    rig: rigged && names.length ? {
+      joints: Uint16Array.from(joints), weights: Float32Array.from(weights), names,
+      bones: [...bones].map(([name, p]) => ({ name, x: p.x, y: p.y, z: p.z })),
+    } : undefined,
   });
 }

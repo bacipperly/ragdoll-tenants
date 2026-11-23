@@ -55,6 +55,9 @@ if (m.measures) {
 if (g.rig) {
   const map = new Map<string, string[]>();
   for (const n of g.rig.names) { const o = ourBoneForRigBone(n); map.set(o, [...(map.get(o) ?? []), n.replace(/^.*:/, '')]); }
+  if (g.rig.bones?.length) {
+    console.log(`\nFrom the rig's joints: hips at ${(((m.hip ?? 0) - m.landmarks.feet) / (m.landmarks.top - m.landmarks.feet) * 100).toFixed(0)}% of the height, knee at ${(m.kneeHeight * 100).toFixed(0)}% of the leg, fins out ${(m.armAngle * 57.3).toFixed(0)}°, legs ${(m.legAngle * 57.3).toFixed(0)}°; weights used: ${m.weights === 'rig' ? "the rig's" : 'ours'}`);
+  }
   console.log('\nRig bones → ours:');
   for (const [o, ns] of map) console.log(`  ${o.padEnd(10)} ← ${ns.slice(0, 8).join(', ')}${ns.length > 8 ? `, … (${ns.length})` : ''}`);
 }

@@ -9,4 +9,5 @@ source/
 # Imported body models stay local (only the generated stand-in is shared)
 public/models/*.glb
 public/models/*.json
+public/models/*.fbx
 !public/models/stand-in.glb

@@ -14,7 +14,7 @@ export interface GlbInfo {
   /** Each vertex's part (which mesh it came from), when there's more than one. */
   part?: Int32Array;
   /** The model's own rig, when its meshes are skinned. */
-  rig?: { joints: Uint16Array; weights: Float32Array; names: string[] };
+  rig?: { joints: Uint16Array; weights: Float32Array; names: string[]; bones?: { name: string; x: number; y: number; z: number }[] };
 }
 
 const COMPONENTS: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
@@ -56,6 +56,7 @@ export function readGlb(file: string): GlbInfo {
   const pos: number[] = [], nrm: number[] = [], idx: number[] = [], part: number[] = [];
   const joints: number[] = [], weights: number[] = [], names: string[] = [];
   let meshes = 0, primitives = 0, rigged = true;
+  const nodeAt = new Map<string, THREE.Vector3>(); // every node's rest position in the world (for the rig's bones)
   const v = new THREE.Vector3(), nm = new THREE.Matrix3();
   const visit = (nodeIndex: number, parent: THREE.Matrix4) => {
     const node = json.nodes[nodeIndex];
@@ -63,6 +64,7 @@ export function readGlb(file: string): GlbInfo {
     if (node.matrix) local.fromArray(node.matrix);
     else local.compose(new THREE.Vector3(...(node.translation ?? [0, 0, 0])), new THREE.Quaternion(...(node.rotation ?? [0, 0, 0, 1])), new THREE.Vector3(...(node.scale ?? [1, 1, 1])));
     const world = parent.clone().multiply(local);
+    if (node.name) nodeAt.set(node.name, new THREE.Vector3().setFromMatrixPosition(world));
     if (node.mesh !== undefined) {
       meshes++;
       nm.getNormalMatrix(world);
@@ -107,7 +109,11 @@ export function readGlb(file: string): GlbInfo {
   return {
     json, positions: Float32Array.from(pos), normals: Float32Array.from(nrm), index: Uint32Array.from(idx), meshes, primitives,
     part: meshes > 1 ? Int32Array.from(part) : undefined,
-    rig: rigged && names.length ? { joints: Uint16Array.from(joints), weights: Float32Array.from(weights), names } : undefined,
+    rig: rigged && names.length ? {
+      joints: Uint16Array.from(joints), weights: Float32Array.from(weights), names,
+      bones: [...new Set((json.skins ?? []).flatMap((sk: any) => sk.joints.map((j: number) => json.nodes[j].name as string)))]
+        .filter((n) => nodeAt.has(n as string)).map((n) => { const p = nodeAt.get(n as string)!; return { name: n as string, x: p.x, y: p.y, z: p.z }; }),
+    } : undefined,
   };
 }
 

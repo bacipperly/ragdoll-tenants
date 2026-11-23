@@ -46,6 +46,8 @@ export interface BodyModelSettings {
   weights?: 'ours' | 'rig';
   /** Where the knee sits, as a share of the leg's length from the foot (default 0.6, a little above halfway). */
   kneeHeight?: number;
+  /** How far the knees bend, × the usual (default 0.6: a thick, short leg folds into itself at a deep bend). */
+  kneeBend?: number;
 }
 
 /** What each separate part of a segmented model is. */
@@ -87,6 +89,8 @@ export interface BodyModel {
   capFrom: number;
   /** Where the knee sits, as a share of the leg from the foot. */
   kneeHeight: number;
+  /** How far the knees bend, × the usual (read live, so it can be tuned on the spot). */
+  kneeBend: number;
 }
 
 /** One physics capsule in the rest pose (vertical), and its bone. */
@@ -466,6 +470,7 @@ export function prepareBodyModel(name: string, positions: Float32Array, normals:
     name, positions: finalPos, normals: finalNrm, index: finalIndex, landmarks, found, armAngle, legAngle, head: settings.head ?? 'goo',
     capFrom: pos.length / 3,
     kneeHeight: Math.min(0.85, Math.max(0.2, settings.kneeHeight ?? 0.6)),
+    kneeBend: Math.min(1, Math.max(0.2, settings.kneeBend ?? 0.6)),
     weights: settings.weights === 'rig' && rig ? 'rig' : 'ours', part: finalPart, roles, hip, rig: rig && finalPos.length > pos.length ? extendRig(rig, (finalPos.length - pos.length) / 3, finalPart!, part!) : rig, measures,
   };
 }
@@ -689,7 +694,7 @@ export function buildImportedSkin(m: BodyModel, D: BodyDims, caps: Capsule[]): T
         body += (1 - body) * inner * (1 - THREE.MathUtils.smoothstep(t, depth, depth + band));
       }
       const knee = Math.max(upperLen, depth + 0.5 * band);
-      lower = THREE.MathUtils.smoothstep(t, knee - 0.35 * band, knee + 0.35 * band);
+      lower = THREE.MathUtils.smoothstep(t, knee - 0.55 * band, knee + 0.55 * band); // a soft knee folds less
     } else {
       lower = THREE.MathUtils.smoothstep(t, upperLen - 0.6 * span, upperLen + 0.6 * span);
       body = 1 - THREE.MathUtils.smoothstep(t, -0.4 * span, 0.7 * span);

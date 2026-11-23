@@ -463,6 +463,8 @@ export class ActiveRagdoll implements AccentSubject {
   private skirt: Skirt | null = null;
   /** Glasses, bow, backpack, cane… (see accessories.ts). */
   private accessories: Accessories | null = null;
+  /** How far its knees bend, × (1: fully; an imported body model may bend less). Read live. */
+  private get kneeBend(): number { return this.skinModel ? bodyModel()?.kneeBend ?? 1 : 1; }
   /** How far it's down on all fours, 0..1 (babies crawl; see CRAWL). */
   private crawl = 0;
   /** Its hair (see hair.ts), and what it was built for (style, colours, under a hat or not). */
@@ -1959,6 +1961,9 @@ export class ActiveRagdoll implements AccentSubject {
             0, 0,
           );
           if (legForwardness > 0) j.targetVel.x = kneeLift * w * (left ? dc : -dc);
+          // An imported body's thick, short legs fold into themselves at a deep bend:
+          // its knees bend only so far (bodyModel's kneeBend).
+          if (this.kneeBend !== 1) { j.target.x *= this.kneeBend; j.targetVel.x *= this.kneeBend; }
           break;
         case 'upperArmL':
         case 'upperArmR': {

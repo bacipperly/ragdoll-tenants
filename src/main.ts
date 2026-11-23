@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Accents, ACCENT_KINDS, ACTIVITIES, ActiveRagdoll, RagdollPhysics, RAPIER, loadBodyModel, setBodyModel, calibrate, setProportionCalibration, type Activity } from './ragdoll';
+import { Accents, ACCENT_KINDS, ACTIVITIES, ActiveRagdoll, RagdollPhysics, RAPIER, loadBodyModel, setBodyModel, bodyModel, calibrate, setProportionCalibration, type Activity } from './ragdoll';
 import { bodyDims } from './ragdoll/proportions';
 import { TRAITS } from './ragdoll/config';
 import { ageName } from './ragdoll/traits';
@@ -419,6 +419,9 @@ if (MODEL && MODEL !== 'procedural') {
   bodyFolder.add(tune, 'knee', 0.3, 0.8, 0.01).name('knee height (0.6 = 60% up)')
     .onChange((v: number) => setProportionCalibration(bodyCal ?? {}, v)) // the selected tenant rebuilds itself
     .onFinishChange(() => { for (const t of [...crowd.tenants]) if (t !== crowd.selected) crowd.replace(t, t.recipe); });
+  const bend = { kneeBend: bodyModel()?.kneeBend ?? 0.6 };
+  bodyFolder.add(bend, 'kneeBend', 0.2, 1, 0.01).name('knee bend (1 = full)')
+    .onChange((v: number) => { const bm = bodyModel(); if (bm) bm.kneeBend = v; }); // live, no rebuild
   gui.$children.prepend(bodyFolder.domElement); // first in the panel, easy to find
 }
 

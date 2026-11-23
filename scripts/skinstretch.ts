@@ -5,11 +5,10 @@
 //   npx tsx scripts/skinstretch.ts [model.glb] [ours|rig]
 import * as THREE from 'three';
 import { RagdollPhysics, RAPIER, recipeFromEditor, prepareBodyModel, setBodyModel, calibrate, setProportionCalibration } from '../src/ragdoll';
-import { readGlb } from './glb';
+import { loadModelFile } from './modelfile';
 const file = process.argv[2], weights = (process.argv[3] ?? 'ours') as 'ours' | 'rig';
 if (file) {
-  const g = readGlb(file);
-  const m = prepareBodyModel('m', g.positions, g.normals, g.index, { weights }, { part: g.part, rig: g.rig });
+  const m = loadModelFile(file, { weights });
   setBodyModel(m); setProportionCalibration(calibrate(m) ?? {}, m.kneeHeight);
 }
 const phys = await RagdollPhysics.create();
@@ -25,7 +24,8 @@ for (let t = 0; t < idx.length; t += 3) for (const [a, b] of [[idx[t], idx[t + 1
   const l = Math.hypot(rest[a * 3] - rest[b * 3], rest[a * 3 + 1] - rest[b * 3 + 1], rest[a * 3 + 2] - rest[b * 3 + 2]);
   if (l > 1e-5) edges.push([a, b, l]);
 }
-const worst = new Float32Array(edges.length);
+const worst = new Float32Array(edges.length), least = new Float32Array(edges.length).fill(Infinity);
+const foldBy = new Map<string, number>();
 const capFrom: number = geo.userData.capFrom ?? Infinity;
 // Seams: vertices that start at the same spot (parts cut from one mesh) should stay together.
 const seamGroups: number[][] = [];
@@ -48,6 +48,8 @@ const sample = () => {
     const [a, b, l] = edges[e];
     const s = Math.hypot(P[a * 3] - P[b * 3], P[a * 3 + 1] - P[b * 3 + 1], P[a * 3 + 2] - P[b * 3 + 2]) / l;
     if (s > worst[e]) worst[e] = s;
+    if (s < least[e]) least[e] = s;
+    if (s < 0.3 && !(a >= capFrom && b >= capFrom)) foldBy.set(label, (foldBy.get(label) ?? 0) + 1);
     if (!(a >= capFrom && b >= capFrom)) growBy.set(label, Math.max(growBy.get(label) ?? 0, (s - 1) * l));
     if ((s - 1) * l > grow) { grow = (s - 1) * l; growAt = `${label}, at y ${rest[a * 3 + 1].toFixed(3)}${a >= capFrom && b >= capFrom ? ', a cap edge (inside the body)' : ''}`; }
     m = Math.max(m, s);
@@ -76,6 +78,14 @@ const order = [...worst.keys()].sort((a, b) => worst[b] - worst[a]);
 const bonesOf = (i: number) => [0, 1, 2, 3].filter((k) => sw[i * 4 + k] > 0.05).map((k) => `${names[si[i * 4 + k]]} ${sw[i * 4 + k].toFixed(2)}`).join(', ');
 console.log('  most a surface edge grows (mm, caps aside): ' + [...growBy].map(([k, g]) => `${k} ${(g * 1000).toFixed(0)}`).join(' · '));
 console.log(`  most any one edge grows: ${(grow * 1000).toFixed(1)} mm (${((grow / r.dims.height) * 100).toFixed(1)}% of the height; ${growAt})`);
+const folded = [...least.keys()].filter((e) => least[e] < 0.3 && !(edges[e][0] >= capFrom && edges[e][1] >= capFrom)).length;
+console.log(`  folding (edges crushed under 30%, caps aside): ${folded} edges · ` + [...foldBy].map(([k, c]) => `${k} ${c}`).join(' · '));
+{
+  const where = new Map<string, number>();
+  const fam = (i: number) => { let b = 0; for (let k = 1; k < 4; k++) if (sw[i * 4 + k] > sw[i * 4 + b]) b = k; const n = names[si[i * 4 + b]] ?? '?'; return n.replace(/[LR]$/, ''); };
+  for (let e = 0; e < edges.length; e++) if (least[e] < 0.3 && !(edges[e][0] >= capFrom && edges[e][1] >= capFrom)) { const f = fam(edges[e][0]); where.set(f, (where.get(f) ?? 0) + 1); }
+  console.log('  folding by part: ' + [...where].sort((a, b) => b[1] - a[1]).map(([k, c]) => `${k} ${c}`).join(' · '));
+}
 console.log(`  seams: ${seamGroups.length} shared points, widest gap ${(seamGap * 1000).toFixed(1)} mm at the legs and body, ${(finGap * 1000).toFixed(1)} mm where fins come away from the body (capped)`);
 console.log(`  widest seam: ${seamAt}`);
 console.log(`  edges over 2× : ${[...worst].filter((s) => s > 2).length} of ${edges.length}; over 4×: ${[...worst].filter((s) => s > 4).length}`);

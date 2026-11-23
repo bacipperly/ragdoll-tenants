@@ -4,11 +4,10 @@
 //   npx tsx scripts/limbmotion.ts [model.glb] [ours|rig]
 import * as THREE from 'three';
 import { RagdollPhysics, RAPIER, recipeFromEditor, prepareBodyModel, setBodyModel, calibrate, setProportionCalibration } from '../src/ragdoll';
-import { readGlb } from './glb';
+import { loadModelFile } from './modelfile';
 const file = process.argv[2], weights = (process.argv[3] ?? 'ours') as 'ours' | 'rig';
 if (file) {
-  const g = readGlb(file);
-  const m = prepareBodyModel('m', g.positions, g.normals, g.index, { weights }, { part: g.part, rig: g.rig });
+  const m = loadModelFile(file, { weights });
   setBodyModel(m); setProportionCalibration(calibrate(m) ?? {}, m.kneeHeight);
 }
 const phys = await RagdollPhysics.create();

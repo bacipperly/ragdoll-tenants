@@ -3,11 +3,10 @@
 //   npx tsx scripts/finclear.ts [model.glb]
 import * as THREE from 'three';
 import { RagdollPhysics, RAPIER, recipeFromEditor, prepareBodyModel, setBodyModel, calibrate, setProportionCalibration, bodyModel } from '../src/ragdoll';
-import { readGlb } from './glb';
+import { loadModelFile } from './modelfile';
 const file = process.argv[2];
 if (file) {
-  const g = readGlb(file);
-  const m = prepareBodyModel('m', g.positions, g.normals, g.index, {}, { part: g.part, rig: g.rig });
+  const m = loadModelFile(file, {});
   setBodyModel(m); setProportionCalibration(calibrate(m) ?? {}, m.kneeHeight);
 }
 const phys = await RagdollPhysics.create();

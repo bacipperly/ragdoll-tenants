@@ -101,6 +101,9 @@ const physics = await RagdollPhysics.create();
 // models/<name>.glb, plus models/<name>.json for its settings; see bodyModel.ts).
 const MODEL = new URLSearchParams(location.search).get('model');
 let modelNote = '';
+/** The loaded body model's calibration and knee height (for the panel's live slider). */
+let bodyCal: ReturnType<typeof calibrate> = null;
+let bodyKnee = 0.6;
 if (MODEL && MODEL !== 'procedural') {
   try {
     // &weights=rig uses the model's own rig weights instead of ours (to compare).
@@ -115,6 +118,7 @@ if (MODEL && MODEL !== 'procedural') {
     // Its proportions become ours (head size and all), so it fits without stretching.
     const cal = calibrate(m);
     setProportionCalibration(cal ?? {}, m.kneeHeight);
+    bodyCal = cal; bodyKnee = m.kneeHeight;
     const guessed = Object.entries(m.found).filter(([, how]) => how === 'guessed').map(([k]) => k);
     modelNote = `body      ${MODEL}.glb (${m.index.length / 3} triangles${m.part ? `, ${m.roles.length} parts` : ''}, ${m.weights === 'rig' ? 'its own rig weights' : 'our weights'}`
       + `${cal ? ', proportions from the model' : ''}${guessed.length ? `, guessed: ${guessed.join(', ')}` : ''})\n`;
@@ -408,6 +412,16 @@ thingsFolder.add({ reset: () => { carry.release(new THREE.Vector3()); things.res
 thingsFolder.close();
 
 // Expressive accents: what you're doing, and every accent on demand to look at.
+// The imported body model, tuned live: drag, watch, and pass the number on.
+if (MODEL && MODEL !== 'procedural') {
+  const bodyFolder = gui.addFolder('Body model');
+  const tune = { knee: bodyKnee };
+  bodyFolder.add(tune, 'knee', 0.3, 0.8, 0.01).name('knee height (0.6 = 60% up)')
+    .onChange((v: number) => setProportionCalibration(bodyCal ?? {}, v)) // the selected tenant rebuilds itself
+    .onFinishChange(() => { for (const t of [...crowd.tenants]) if (t !== crowd.selected) crowd.replace(t, t.recipe); });
+  gui.$children.prepend(bodyFolder.domElement); // first in the panel, easy to find
+}
+
 const accentFolder = gui.addFolder('Accents');
 const accentState = { on: true, activity: '' };
 accentFolder.add(accentState, 'on').name('show accents').onChange((v: boolean) => { accents.enabled = v; });
